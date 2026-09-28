@@ -22,6 +22,8 @@ export class Inspector {
     private readonly root: HTMLElement;
     private readonly context: PanelContext;
     private shown: string | null = null;
+    /** What the open panel was built from, so a record changed elsewhere shows its new values. */
+    private shownSignature = "";
 
     constructor(root: HTMLElement, context: PanelContext) {
         this.root = root;
@@ -65,14 +67,24 @@ export class Inspector {
         }
 
         const key = `${selection.type}:${selection.id}`;
-        if (this.shown === key) {
+        const signature = this.signatureOf(inspected);
+        if (this.shown === key && this.shownSignature === signature) {
             this.refreshTitle(inspected);
             return;
         }
 
+        // The same record read again keeps its place in the panel, which only its content changed
+        const scrolled = this.shown === key ? this.root.querySelector(".tlg-inspector-body")?.scrollTop ?? 0 : 0;
         this.shown = key;
+        this.shownSignature = signature;
         this.root.hidden = false;
         this.root.replaceChildren(this.header(inspected), this.body(inspected), this.footer(inspected));
+        const body = this.root.querySelector(".tlg-inspector-body");
+        if (body && scrolled > 0) body.scrollTop = scrolled;
+    }
+
+    private signatureOf(inspected: InspectedRecord): string {
+        return JSON.stringify(inspected.record);
     }
 
     /**
@@ -85,6 +97,8 @@ export class Inspector {
             this.close();
             return;
         }
+        // An edit made in the panel is already on screen, so it must not make the next load rebuild it
+        this.shownSignature = this.signatureOf(inspected);
         this.refreshTitle(inspected);
     }
 

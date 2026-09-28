@@ -13,8 +13,14 @@ All notable changes to this project are documented here. The format follows
   under a minute read in seconds, with a `seconds` suffix in `durationUnits`, editable in the settings, that
   defaults to `s` so units saved earlier keep working.
 
+- The workspace shows changes made elsewhere, by a colleague or through the API, without a reload. It looks
+  every five seconds, set by `syncInterval`, and waits while something typed is not committed yet, a record
+  is being dragged, a confirmation or a list is open, or a save is in flight, so nothing is redrawn under the
+  viewer. A field that only had the focus gets it back after the redraw.
+
 ### Fixed
 
+- The details panel shows a record changed elsewhere while it is open, keeping its scroll.
 - Editing the date of a step no longer drops the seconds it was recorded with through the API.
 - A span just short of an hour reads as 1h rather than 60min.
 

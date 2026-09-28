@@ -628,6 +628,7 @@ await mountTimeline(element, { api, incidentId, icons });
 | `preferenceKey` | `string` | `cyber-incidents-timeline` | Key prefix for those preferences |
 | `slideHeader` | `(header, context) => header` | none | Rewrites the title block of every slide, see [Slide header](#slide-header) |
 | `onNotify` | `(message) => void` | toast | Receives messages such as save failures |
+| `syncInterval` | `number` or `null` | `5000` | Milliseconds between looks for changes made elsewhere, shown without a reload. `null` turns it off |
 
 It resolves to a handle:
 
@@ -657,7 +658,7 @@ It resolves to a handle:
 | `settingsScope` | `SettingsScope` | `Presentation` | `Everything` also offers the impact scale and milestones, see [Viewer settings](#viewer-settings) |
 | `onSettingsSaved` | `(settings) => void` | none | Called after the settings are saved, so the host can rebuild its service |
 | `preferences`, `preferenceKey` | | `localStorage`, `cyber-incidents-timeline-app` | Where the theme choice and the settings are remembered |
-| `timeline` | `TimelineOptions` | none | Passed to the workspace: `renderers`, `permissions`, `slideHeader`, `icons`, `themeDetector` |
+| `timeline` | `TimelineOptions` | none | Passed to the workspace: `renderers`, `permissions`, `slideHeader`, `icons`, `themeDetector`, `syncInterval` |
 | `onNotify` | `(message) => void` | toast | Receives messages such as load failures |
 
 It resolves to a handle with `timeline` (the workspace handle of the open incident, or `null`), `open(id)`,

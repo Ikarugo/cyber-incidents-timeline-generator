@@ -51,6 +51,7 @@ export interface WorkspaceStrings {
     redoExpired: string;
     loadFailed: string;
     saveFailed: string;
+    updatedElsewhere: string;
     createFailed: string;
     deleteFailed: string;
     exportFailed: string;
@@ -562,6 +563,7 @@ export const DEFAULT_STRINGS: Strings = {
         redoExpired: "That change can no longer be redone.",
         loadFailed: "The incident diagram could not be loaded.",
         saveFailed: "The change could not be saved, reloading the diagram.",
+        updatedElsewhere: "Updated with changes made elsewhere.",
         createFailed: "The record could not be created.",
         deleteFailed: "The record could not be deleted.",
         exportFailed: "The export could not be produced.",
