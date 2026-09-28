@@ -689,15 +689,15 @@ class SettingsDialog {
         const locale = this.draft.locale ?? LOCALES[0] ?? "";
         const locales: Choice<string>[] = [...new Set([...LOCALES, locale])].map(value => ({ value, label: value }));
         const dates = select(locale, locales, value => { this.draft.locale = value; }, forms);
-        const units = this.draft.durationUnits ?? DEFAULT_DURATION_UNITS;
+        const units: Required<DurationUnits> = { ...DEFAULT_DURATION_UNITS, ...this.draft.durationUnits };
         const unitInput = (key: keyof DurationUnits, label: string): HTMLElement => {
             const input = textInput(units[key], value => {
                 const trimmed = value?.trim() ?? "";
                 if (trimmed === "") {
-                    input.value = (this.draft.durationUnits ?? DEFAULT_DURATION_UNITS)[key];
+                    input.value = { ...DEFAULT_DURATION_UNITS, ...this.draft.durationUnits }[key];
                     return;
                 }
-                this.draft.durationUnits = { ...(this.draft.durationUnits ?? DEFAULT_DURATION_UNITS), [key]: trimmed };
+                this.draft.durationUnits = { ...DEFAULT_DURATION_UNITS, ...this.draft.durationUnits, [key]: trimmed };
             });
             input.maxLength = MAX_UNIT_LENGTH;
             return field(label, input);
@@ -707,7 +707,7 @@ class SettingsDialog {
             section(words.pagesHeading, words.pagesHint, [row(field(words.pageShape, pageShape), field(words.layout, layout)), field(words.viewPicker, picker)]),
             section(words.datesHeading, words.datesHint, [
                 field(words.dateFormat, dates),
-                row(unitInput("minutes", words.minutes), unitInput("hours", words.hours), unitInput("days", words.days))
+                row(unitInput("seconds", words.seconds), unitInput("minutes", words.minutes), unitInput("hours", words.hours), unitInput("days", words.days))
             ])
         ];
     }

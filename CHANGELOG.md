@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- The time of a step can be entered to the second, as logs record it. Seconds show on slides, in the list
+  and in the narrative only when they were recorded, so timelines kept to the minute read as before. Spans
+  under a minute read in seconds, with a `seconds` suffix in `durationUnits`, editable in the settings, that
+  defaults to `s` so units saved earlier keep working.
+
+### Fixed
+
+- Editing the date of a step no longer drops the seconds it was recorded with through the API.
+- A span just short of an hour reads as 1h rather than 60min.
+
 ## [0.5.1] - 2026-09-21
 
 ### Changed

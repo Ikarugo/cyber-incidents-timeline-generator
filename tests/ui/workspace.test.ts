@@ -19,6 +19,9 @@ const BETWEEN_STEPS = "2026-01-12T09:00:00";
 const AFTER_LAST_STEP = "2026-01-12T11:00:00";
 const PERSON_NAME = "Alice";
 const EXPLOIT_NAME = "CVE-2026-0001";
+const STEP_WITH_SECONDS = "2026-01-12T08:00:15";
+const EDITED_WITH_SECONDS = "2026-01-12T08:00:42";
+const TIME_FIELD = '.tlg-inspector input[type="time"]';
 
 async function settle(): Promise<void> {
     for (let round = 0; round < SETTLE_ROUNDS; round += 1) {
@@ -348,6 +351,27 @@ describe("mountTimeline", () => {
         assert.equal(kept.parentId, owner.id);
         assert.equal(kept.kind, NodeKind.Exploit);
         assert.equal(kept.side, Side.Attacker);
+        handle.destroy();
+    });
+
+    it("edits the time of a step to the second in the details panel", async () => {
+        const { service } = createService();
+        const incident = await createIncident(service);
+        const step = await service.createStep(incident.id, { title: "Beacon", timestamp: STEP_WITH_SECONDS });
+        const element = mountPoint();
+        const handle = await mountTimeline(element, { api: service, incidentId: incident.id, preferences: null });
+
+        handle.select({ type: RecordType.Step, id: step.id });
+        await settle();
+        const time = element.querySelector<HTMLInputElement>(TIME_FIELD);
+        assert.ok(time, "The details panel has no time field");
+        assert.equal(time.getAttribute("step"), "1");
+        assert.equal(time.value, "08:00:15");
+
+        time.value = "08:00:42";
+        time.dispatchEvent(syntheticEvent("change"));
+        await settle();
+        assert.equal((await service.getDiagram(incident.id)).steps[0]?.timestamp, EDITED_WITH_SECONDS);
         handle.destroy();
     });
 });

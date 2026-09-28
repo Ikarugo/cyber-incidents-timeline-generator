@@ -242,8 +242,10 @@ function unit(value: unknown): value is string {
 
 function parseDurationUnits(value: unknown): DurationUnits | null {
     if (!isRecord(value)) return null;
-    const { minutes, hours, days } = value;
-    return unit(minutes) && unit(hours) && unit(days) ? { minutes, hours, days } : null;
+    const { seconds, minutes, hours, days } = value;
+    if (!unit(minutes) || !unit(hours) || !unit(days)) return null;
+    // Settings saved before seconds could be recorded hold none, and fall back to the default suffix
+    return { ...(unit(seconds) ? { seconds } : {}), minutes, hours, days };
 }
 
 /**

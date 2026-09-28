@@ -17,6 +17,16 @@ export interface AxisLayout {
 }
 
 const DEFAULT_TICKS = 7;
+const MILLISECONDS_PER_MINUTE = 60000;
+
+/**
+ * Ticks land wherever the span happens to divide, so their seconds are noise unless the ticks sit less
+ * than a minute apart and the minutes alone would repeat.
+ */
+function ticksNeedSeconds(marks: readonly Date[]): boolean {
+    const [first, second] = marks;
+    return first !== undefined && second !== undefined && second.getTime() - first.getTime() < MILLISECONDS_PER_MINUTE;
+}
 
 export function timeAxis(palette: Palette, scale: TimeScale, { x, width, top, bottom, ticks = DEFAULT_TICKS, showGrid = true }: AxisLayout, time: TimeFormats = DEFAULT_TIME): SVGGElement {
     const node = group();
@@ -28,6 +38,7 @@ export function timeAxis(palette: Palette, scale: TimeScale, { x, width, top, bo
     }
 
     const marks = timeTicks(scale, ticks);
+    const withSeconds = ticksNeedSeconds(marks);
     let previousDay: string | null = null;
 
     marks.forEach((moment, index) => {
@@ -38,7 +49,7 @@ export function timeAxis(palette: Palette, scale: TimeScale, { x, width, top, bo
         }
 
         const day = time.formatDate(moment);
-        node.appendChild(text(time.formatTime(moment), position, top - 10, { "font-size": 10.5, "text-anchor": "middle", fill: palette.inkMuted }));
+        node.appendChild(text(time.formatTime(moment, withSeconds), position, top - 10, { "font-size": 10.5, "text-anchor": "middle", fill: palette.inkMuted }));
         if (day !== previousDay) {
             node.appendChild(text(day, position, top - 24, { "font-size": 10.5, "font-weight": 700, "text-anchor": "middle", fill: palette.ink }));
             previousDay = day;
