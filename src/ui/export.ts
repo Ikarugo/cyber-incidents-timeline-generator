@@ -22,7 +22,9 @@ export enum ExportFormat {
     Csv = "csv",
     Markdown = "markdown",
     /** The table on the clipboard, as tab separated text and as HTML, rather than in a file. */
-    Clipboard = "clipboard"
+    Clipboard = "clipboard",
+    /** The records with their evidence files, in one ZIP, from a server that keeps files. */
+    Bundle = "bundle"
 }
 
 const PNG_SCALE = 2;

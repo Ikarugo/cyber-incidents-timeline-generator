@@ -17,3 +17,4 @@ export * from "./store.js";
 export * from "./mapping.js";
 export * from "./service.js";
 export * from "./sample.js";
+export * from "./attachments.js";

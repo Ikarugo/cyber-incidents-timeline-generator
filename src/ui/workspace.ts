@@ -8,6 +8,7 @@ import type { Catalog } from "../core/catalog.js";
 import { Audience, RecordType, Representation, type AudienceKey, type RepresentationKey } from "../core/enums.js";
 import { Icon } from "../core/icon.js";
 import { linkFieldsOf, nodeFieldsOf, stepFieldsOf } from "../core/mapping.js";
+import { supportsAttachments, type AttachmentApi } from "../core/attachments.js";
 import type { Diagram, LinkCreateInput, RecordId, StepInvolvement } from "../core/models.js";
 import type { TimelineApi } from "../core/service.js";
 import type { KeyValueStorage } from "../storage/browser-storage-store.js";
@@ -19,7 +20,7 @@ import { History, type HistoryEntry } from "./history.js";
 import { IconSet } from "./icons/icon-set.js";
 import { Inspector } from "./inspector.js";
 import { Access } from "./panels.js";
-import type { RecordDraft, RecordEdit, TimelinePermissions, WorkspaceActions } from "./panels.js";
+import type { AttachmentActions, RecordDraft, RecordEdit, TimelinePermissions, WorkspaceActions } from "./panels.js";
 import { Preferences, defaultPreferenceStorage } from "./preferences.js";
 import { Rail } from "./rail.js";
 import { BUILT_IN_RENDERERS } from "./renderers/index.js";
@@ -122,6 +123,7 @@ export interface TimelineHandle {
 const DEFAULT_PREFERENCE_KEY = "cyber-incidents-timeline";
 const TOAST_MS = 4000;
 const DEFAULT_SYNC_MS = 5000;
+const ZIP_SIGNATURE = [0x50, 0x4b, 0x03, 0x04];
 // Anything waiting for the viewer to answer or pick, which a redraw would close under them
 const PENDING_CHOICE = ".is-confirming, .is-asking, details[open], .tlg-addmenu:not([hidden]), [aria-expanded=\"true\"]";
 const DETAIL_FIELDS = "input, textarea, select";
@@ -161,8 +163,9 @@ function audienceChoices(strings: Strings, catalog: Catalog): readonly RendererC
     return [{ value: Audience.Both, label: strings.workspace.audienceEverything }, ...catalog.audiences];
 }
 
-function exportChoices(strings: Strings): readonly { format: ExportFormat; label: string; icon: Icon }[] {
+function exportChoices(strings: Strings, withFiles = false): readonly { format: ExportFormat; label: string; icon: Icon }[] {
     return [
+        ...(withFiles ? [{ format: ExportFormat.Bundle, label: strings.workspace.exportBundle, icon: Icon.Paperclip }] : []),
         { format: ExportFormat.Png, label: strings.workspace.exportPng, icon: Icon.Image },
         { format: ExportFormat.Svg, label: strings.workspace.exportSvg, icon: Icon.Vector },
         { format: ExportFormat.Html, label: strings.workspace.exportHtml, icon: Icon.Code },
@@ -361,7 +364,8 @@ class Workspace implements TimelineHandle {
             create: draft => this.create(draft),
             edit: (id, edit) => this.edit(id, edit),
             remove: (type, id) => this.remove(type, id),
-            notify: message => this.notify(message)
+            notify: message => this.notify(message),
+            ...(supportsAttachments(this.api) ? { attachments: this.attachmentActions(this.api) } : {})
         };
         const panelContext = { store: this.store, actions, permissions: this.permissions, icons: this.icons, strings: this.strings, time: this.time, signal };
         this.rail = new Rail(this.elements, panelContext);
@@ -388,7 +392,7 @@ class Workspace implements TimelineHandle {
 
         const exportMenu = this.permissions.canExport ? h("details", "tlg-menu tlg-export-menu", {}, [
             h("summary", "tlg-button", {}, [icons.element(Icon.Download), words.export]),
-            h("div", "tlg-menu-list", { role: "menu" }, exportChoices(this.strings).map(entry => h("button", "tlg-menu-item", { type: "button", role: "menuitem", "data-export": entry.format }, [icons.element(entry.icon), entry.label])))
+            h("div", "tlg-menu-list", { role: "menu" }, exportChoices(this.strings, supportsAttachments(this.api)).map(entry => h("button", "tlg-menu-item", { type: "button", role: "menuitem", "data-export": entry.format }, [icons.element(entry.icon), entry.label])))
         ]) : null;
 
         // Beside the export, because opening a timeline file and writing one out are the same errand, and
@@ -396,7 +400,7 @@ class Workspace implements TimelineHandle {
         const importButton = this.permissions.canCreate
             ? iconButton(Icon.Upload, words.import)
             : null;
-        const importPicker = h("input", "tlg-import-picker", { type: "file", accept: "application/json,.json", hidden: "" });
+        const importPicker = h("input", "tlg-import-picker", { type: "file", accept: supportsAttachments(this.api) ? "application/json,.json,application/zip,.zip" : "application/json,.json", hidden: "" });
 
         const scrolling = this.viewPicker === ViewPicker.Scroll;
         const views = scrolling ? h("div", "tlg-views", { role: "tablist", "aria-label": words.representations }) : null;
@@ -522,7 +526,7 @@ class Workspace implements TimelineHandle {
         elements.exportMenu?.querySelectorAll<HTMLButtonElement>("[data-export]").forEach(control => {
             control.addEventListener("click", () => {
                 if (elements.exportMenu) elements.exportMenu.open = false;
-                const format = exportChoices(this.strings).find(entry => entry.format === control.getAttribute("data-export"))?.format;
+                const format = exportChoices(this.strings, supportsAttachments(this.api)).find(entry => entry.format === control.getAttribute("data-export"))?.format;
                 if (format) void this.exportAs(format);
             }, { signal });
         });
@@ -1322,6 +1326,55 @@ class Workspace implements TimelineHandle {
     }
 
     /**
+     * What the details panel does with evidence files. Each call holds redraws back like a save, then reads
+     * the diagram again, which carries the files and the records they belong to.
+     */
+    private attachmentActions(api: AttachmentApi): AttachmentActions {
+        const words = this.strings.workspace;
+        const run = async (work: () => Promise<void>, failed: string): Promise<void> => {
+            this.revision += 1;
+            this.unsaved += 1;
+            try {
+                await work();
+                await this.reload();
+            } catch (error) {
+                this.notify(error instanceof Error && error.message ? `${failed} ${error.message}` : failed);
+                await this.reload().catch(() => undefined);
+            } finally {
+                this.unsaved -= 1;
+            }
+        };
+        return {
+            upload: (stepId, files) => run(async () => {
+                for (const file of files) {
+                    const attachment = await api.uploadAttachment(this.incidentId, file, file.name);
+                    await api.linkAttachment(this.incidentId, stepId, attachment.id);
+                }
+            }, words.attachmentUploadFailed),
+            link: (stepId, attachmentId) => run(() => api.linkAttachment(this.incidentId, stepId, attachmentId), words.attachmentChangeFailed),
+            unlink: (stepId, attachmentId) => run(() => api.unlinkAttachment(this.incidentId, stepId, attachmentId), words.attachmentChangeFailed),
+            uploadToNode: (nodeId, file) => run(async () => {
+                const attachment = await api.uploadAttachment(this.incidentId, file, file.name);
+                await api.linkNodeAttachment(this.incidentId, nodeId, attachment.id);
+                const node = this.store.node(nodeId);
+                if (!node) return;
+                // The hash identifies a file better than anything typed, and its name beats the kind as a label
+                const kindLabel = this.store.kindInfo(node.kind).label;
+                const patch = {
+                    ...(node.identifier ? {} : { identifier: attachment.sha256 }),
+                    ...(node.name.trim() === "" || node.name === kindLabel ? { name: attachment.fileName } : {})
+                };
+                if (Object.keys(patch).length > 0) await this.api.updateNode(this.incidentId, nodeId, patch);
+            }, words.attachmentUploadFailed),
+            linkNode: (nodeId, attachmentId) => run(() => api.linkNodeAttachment(this.incidentId, nodeId, attachmentId), words.attachmentChangeFailed),
+            unlinkNode: (nodeId, attachmentId) => run(() => api.unlinkNodeAttachment(this.incidentId, nodeId, attachmentId), words.attachmentChangeFailed),
+            remove: attachmentId => run(() => api.deleteAttachment(this.incidentId, attachmentId), words.attachmentChangeFailed),
+            url: (attachmentId, usage) => api.attachmentUrl(this.incidentId, attachmentId, usage),
+            bundleUrl: () => api.bundleUrl(this.incidentId)
+        };
+    }
+
+    /**
      * Loads a diagram the api served and keeps the selection. It is read as text first because the store
      * patches what it loads in place, and the text is what the next look compares against.
      */
@@ -1392,7 +1445,12 @@ class Workspace implements TimelineHandle {
         if (!file || !this.permissions.canCreate) return;
 
         try {
-            const report = await this.api.importDocument(JSON.parse(await file.text()), { into: this.incidentId });
+            // Told by its first bytes, since a bundle renamed on the way still has to open
+            const start = new Uint8Array(await file.slice(0, ZIP_SIGNATURE.length).arrayBuffer());
+            const bundle = ZIP_SIGNATURE.every((byte, index) => start[index] === byte);
+            const report = bundle && supportsAttachments(this.api)
+                ? await this.api.importBundle(file, this.incidentId)
+                : await this.api.importDocument(JSON.parse(await file.text()), { into: this.incidentId });
             await this.reload();
             this.redraw();
             this.notify(this.strings.workspace.imported(report.created.nodes, report.created.steps));
@@ -1403,6 +1461,16 @@ class Workspace implements TimelineHandle {
 
     async exportAs(format: ExportFormat): Promise<void> {
         if (!this.store.isLoaded) return;
+
+        if (format === ExportFormat.Bundle) {
+            if (!supportsAttachments(this.api)) return;
+            // The server writes the archive; the browser streams it to disk like any download
+            const link = h("a", null, { href: this.api.bundleUrl(this.incidentId), download: "" });
+            document.body.append(link);
+            link.click();
+            link.remove();
+            return;
+        }
 
         if (format === ExportFormat.Document) {
             try {

@@ -11,6 +11,9 @@ export class TableNames {
     readonly involvements: string;
     readonly tags: string;
     readonly links: string;
+    readonly attachments: string;
+    readonly stepAttachments: string;
+    readonly nodeAttachments: string;
     readonly catalogSettings: string;
 
     /**
@@ -34,6 +37,9 @@ export class TableNames {
         this.involvements = `${qualified}step_involvements`;
         this.tags = `${qualified}step_tags`;
         this.links = `${qualified}links`;
+        this.attachments = `${qualified}attachments`;
+        this.stepAttachments = `${qualified}step_attachments`;
+        this.nodeAttachments = `${qualified}node_attachments`;
         this.catalogSettings = `${qualified}catalog_settings`;
     }
 }
@@ -157,6 +163,42 @@ CREATE INDEX IF NOT EXISTS ${tables.links}_incident ON ${tables.links}(incident_
 CREATE TABLE IF NOT EXISTS ${tables.catalogSettings} (
     id INTEGER PRIMARY KEY,
     settings TEXT NOT NULL
+);
+`;
+}
+
+/**
+ * The tables of the evidence files, kept apart from the timeline so a store that holds no files needs none.
+ * Only the reference server on SQLite keeps files, so there is no PostgreSQL twin. Deleting a step or a
+ * record unties the files from it, and deleting an incident deletes its files.
+ */
+export function sqliteAttachmentSchema(tables: TableNames): string {
+    return `
+CREATE TABLE IF NOT EXISTS ${tables.attachments} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    incident_id INTEGER NOT NULL REFERENCES ${tables.incidents}(id) ON DELETE CASCADE,
+    file_name TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    media_type TEXT NULL,
+    md5 TEXT NOT NULL,
+    sha1 TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    uploaded_at TEXT NOT NULL,
+    UNIQUE (incident_id, sha256)
+);
+CREATE INDEX IF NOT EXISTS ${tables.attachments}_sha256 ON ${tables.attachments}(sha256);
+
+CREATE TABLE IF NOT EXISTS ${tables.stepAttachments} (
+    step_id INTEGER NOT NULL REFERENCES ${tables.steps}(id) ON DELETE CASCADE,
+    attachment_id INTEGER NOT NULL REFERENCES ${tables.attachments}(id) ON DELETE CASCADE,
+    PRIMARY KEY (step_id, attachment_id)
+);
+
+CREATE TABLE IF NOT EXISTS ${tables.nodeAttachments} (
+    node_id INTEGER NOT NULL REFERENCES ${tables.nodes}(id) ON DELETE CASCADE,
+    attachment_id INTEGER NOT NULL REFERENCES ${tables.attachments}(id) ON DELETE CASCADE,
+    PRIMARY KEY (node_id, attachment_id)
 );
 `;
 }

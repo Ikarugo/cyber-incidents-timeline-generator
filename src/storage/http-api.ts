@@ -20,6 +20,7 @@ import type {
 } from "../core/models.js";
 import type { TimelineApi } from "../core/service.js";
 import type { DiagramSummary } from "../core/summary.js";
+import { AttachmentUsage, type Attachment, type AttachmentApi } from "../core/attachments.js";
 import type { ImportOptions, ImportReport, TimelineDocument } from "../core/document.js";
 
 export enum HttpMethod {
@@ -100,7 +101,7 @@ async function failure(response: Response, method: HttpMethod, url: string): Pro
  * The workspace talking to a server over the REST contract. Any backend implementing that contract,
  * in any language and on any database, works with it.
  */
-export class HttpTimelineApi implements TimelineApi {
+export class HttpTimelineApi implements TimelineApi, AttachmentApi {
     private readonly baseUrl: string;
     private readonly headers: () => Record<string, string> | Promise<Record<string, string>>;
     private readonly credentials: RequestCredentials;
@@ -243,5 +244,66 @@ export class HttpTimelineApi implements TimelineApi {
 
     saveLayout(incidentId: RecordId, layouts: LayoutInput[]): Promise<void> {
         return this.write(HttpMethod.Put, `${this.incident(incidentId)}/layout`, layouts);
+    }
+
+    listAttachments(incidentId: RecordId): Promise<Attachment[]> {
+        return this.read(HttpMethod.Get, `${this.incident(incidentId)}/attachments`);
+    }
+
+    /** Sends the file as it is, not as JSON, with its name in a header since the body has no room for it. */
+    async uploadAttachment(incidentId: RecordId, file: Blob, fileName: string): Promise<Attachment> {
+        return this.sendFile(`${this.incident(incidentId)}/attachments`, file, { "X-File-Name": encodeURIComponent(fileName) });
+    }
+
+    linkAttachment(incidentId: RecordId, stepId: RecordId, attachmentId: RecordId): Promise<void> {
+        return this.write(HttpMethod.Put, `${this.incident(incidentId)}/steps/${encodeURIComponent(stepId)}/attachments/${encodeURIComponent(attachmentId)}`);
+    }
+
+    unlinkAttachment(incidentId: RecordId, stepId: RecordId, attachmentId: RecordId): Promise<void> {
+        return this.write(HttpMethod.Delete, `${this.incident(incidentId)}/steps/${encodeURIComponent(stepId)}/attachments/${encodeURIComponent(attachmentId)}`);
+    }
+
+    linkNodeAttachment(incidentId: RecordId, nodeId: RecordId, attachmentId: RecordId): Promise<void> {
+        return this.write(HttpMethod.Put, `${this.incident(incidentId)}/nodes/${encodeURIComponent(nodeId)}/attachments/${encodeURIComponent(attachmentId)}`);
+    }
+
+    unlinkNodeAttachment(incidentId: RecordId, nodeId: RecordId, attachmentId: RecordId): Promise<void> {
+        return this.write(HttpMethod.Delete, `${this.incident(incidentId)}/nodes/${encodeURIComponent(nodeId)}/attachments/${encodeURIComponent(attachmentId)}`);
+    }
+
+    deleteAttachment(incidentId: RecordId, attachmentId: RecordId): Promise<void> {
+        return this.write(HttpMethod.Delete, `${this.incident(incidentId)}/attachments/${encodeURIComponent(attachmentId)}`);
+    }
+
+    importBundle(bundle: Blob, into?: RecordId): Promise<ImportReport> {
+        return this.sendFile(into === undefined ? "/bundles" : `${this.incident(into)}/bundle`, bundle, {});
+    }
+
+    /**
+     * A plain address the browser opens itself, so large files stream to disk. It carries no header, so a
+     * host whose api authenticates with headers rather than cookies has to allow it another way.
+     */
+    attachmentUrl(incidentId: RecordId, attachmentId: RecordId, usage: AttachmentUsage): string {
+        const query = usage === AttachmentUsage.Preview ? `?usage=${AttachmentUsage.Preview}` : "";
+        return `${this.baseUrl}${this.incident(incidentId)}/attachments/${encodeURIComponent(attachmentId)}/content${query}`;
+    }
+
+    bundleUrl(incidentId: RecordId): string {
+        return `${this.baseUrl}${this.incident(incidentId)}/bundle`;
+    }
+
+    private async sendFile<TResult>(path: string, body: Blob, extraHeaders: Record<string, string>): Promise<TResult> {
+        const url = `${this.baseUrl}${path}`;
+        const response = await this.fetcher(url, {
+            method: HttpMethod.Post,
+            headers: { Accept: "application/json", ...(await this.headers()), "Content-Type": "application/octet-stream", ...extraHeaders },
+            credentials: this.credentials,
+            cache: "no-store",
+            body
+        });
+        if (!response.ok) {
+            throw await failure(response, HttpMethod.Post, url);
+        }
+        return response.json();
     }
 }

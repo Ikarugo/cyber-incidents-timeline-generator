@@ -19,6 +19,7 @@ export interface WorkspaceStrings {
     exportHtml: string;
     exportPrint: string;
     exportDocument: string;
+    exportBundle: string;
     exportXlsx: string;
     exportCsv: string;
     exportMarkdown: string;
@@ -52,6 +53,8 @@ export interface WorkspaceStrings {
     loadFailed: string;
     saveFailed: string;
     updatedElsewhere: string;
+    attachmentUploadFailed: string;
+    attachmentChangeFailed: string;
     createFailed: string;
     deleteFailed: string;
     exportFailed: string;
@@ -149,6 +152,22 @@ export interface InspectorStrings {
     everyone: string;
     evidenceSource: string;
     evidenceSourceHint: string;
+    evidenceFiles: string;
+    attachFile: string;
+    attachExisting: string;
+    noEvidenceFiles: string;
+    download: string;
+    downloadLocked: string;
+    sampleNotice: string;
+    hashes: string;
+    detach: string;
+    deleteFile: string;
+    confirmDeleteFile: string;
+    alsoOnSteps: (count: number) => string;
+    fileContent: string;
+    uploadFileContent: string;
+    noFileContent: string;
+    provesSteps: (count: number) => string;
     milestone: string;
     namedMilestone: string;
     tags: string;
@@ -531,6 +550,7 @@ export const DEFAULT_STRINGS: Strings = {
         exportHtml: "Interactive HTML",
         exportPrint: "Print or save as PDF",
         exportDocument: "Timeline file, to open elsewhere",
+        exportBundle: "Timeline with its files (.zip)",
         exportXlsx: "Excel workbook, the timeline as a table",
         exportCsv: "CSV, the timeline as a table",
         exportMarkdown: "Markdown table",
@@ -564,6 +584,8 @@ export const DEFAULT_STRINGS: Strings = {
         loadFailed: "The incident diagram could not be loaded.",
         saveFailed: "The change could not be saved, reloading the diagram.",
         updatedElsewhere: "Updated with changes made elsewhere.",
+        attachmentUploadFailed: "The file could not be attached.",
+        attachmentChangeFailed: "The evidence files could not be changed.",
         createFailed: "The record could not be created.",
         deleteFailed: "The record could not be deleted.",
         exportFailed: "The export could not be produced.",
@@ -658,6 +680,22 @@ export const DEFAULT_STRINGS: Strings = {
         everyone: "Everyone",
         evidenceSource: "Evidence source",
         evidenceSourceHint: "EDR, SIEM, user report",
+        evidenceFiles: "Evidence files",
+        attachFile: "Attach files",
+        attachExisting: "Add a file already in the incident",
+        noEvidenceFiles: "No file proves this step yet.",
+        download: "Download",
+        downloadLocked: "Download as ZIP",
+        sampleNotice: "Handled as hostile: it only downloads inside a ZIP locked with the password infected.",
+        hashes: "Hashes",
+        detach: "Untie from this step",
+        deleteFile: "Delete the file",
+        confirmDeleteFile: "Delete from the whole incident",
+        alsoOnSteps: count => (count === 1 ? "Also proves 1 other step" : `Also proves ${count} other steps`),
+        fileContent: "Content",
+        uploadFileContent: "Upload the file",
+        noFileContent: "The content of this file is not kept yet.",
+        provesSteps: count => (count === 1 ? "Proves 1 step" : `Proves ${count} steps`),
         milestone: "Milestone",
         namedMilestone: "Named milestone",
         tags: "Tags",

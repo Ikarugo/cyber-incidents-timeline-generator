@@ -56,8 +56,8 @@ export interface TimelineHttpOptions {
 
 export const DEFAULT_MAX_BODY_BYTES = 1_000_000;
 
-class PayloadTooLargeError extends Error {}
-class UnsupportedMediaTypeError extends Error {}
+export class PayloadTooLargeError extends Error {}
+export class UnsupportedMediaTypeError extends Error {}
 class MalformedBodyError extends Error {}
 
 interface RouteParams {
@@ -159,7 +159,7 @@ function buildRoutes(api: TimelineApi): Route[] {
     ];
 }
 
-function parseId(segment: string): RecordId | null {
+export function parseId(segment: string): RecordId | null {
     return /^[1-9]\d{0,15}$/.test(segment) ? Number(segment) : null;
 }
 
@@ -209,7 +209,7 @@ async function readBody(request: IncomingMessage, maxBytes: number): Promise<unk
     }
 }
 
-function send(response: ServerResponse, status: HttpStatus, body?: unknown): void {
+export function send(response: ServerResponse, status: HttpStatus, body?: unknown): void {
     response.statusCode = status;
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("X-Content-Type-Options", "nosniff");
@@ -221,7 +221,7 @@ function send(response: ServerResponse, status: HttpStatus, body?: unknown): voi
     response.end(JSON.stringify(body));
 }
 
-function statusOf(error: unknown): HttpStatus {
+export function statusOf(error: unknown): HttpStatus {
     if (error instanceof ValidationError || error instanceof MalformedBodyError) return HttpStatus.BadRequest;
     if (error instanceof NotFoundError) return HttpStatus.NotFound;
     if (error instanceof ForbiddenError) return HttpStatus.Forbidden;
@@ -231,7 +231,7 @@ function statusOf(error: unknown): HttpStatus {
     return HttpStatus.InternalServerError;
 }
 
-function errorBody(error: unknown, status: HttpStatus): unknown {
+export function errorBody(error: unknown, status: HttpStatus): unknown {
     if (status === HttpStatus.InternalServerError || !(error instanceof Error)) {
         // Internal details stay on the server; the caller only learns that it failed
         return { message: "The request could not be completed." };

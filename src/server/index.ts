@@ -6,7 +6,11 @@ import { SqlTimelineStore, type SqlTimelineStoreOptions } from "./sql/sql-store.
 import { SqlCatalogStore } from "./sql/sql-catalog-store.js";
 import { sqliteSchema } from "./sql/schema.js";
 
+export * from "./attachment-http.js";
+export * from "./attachments.js";
+export * from "./bundle.js";
 export * from "./http.js";
+export * from "./zip.js";
 export * from "./static.js";
 export * from "./sql/driver.js";
 export * from "./sql/schema.js";
@@ -16,6 +20,8 @@ export * from "./sql/sqlite-driver.js";
 
 export interface TimelineServerOptions extends TimelineHttpOptions {
     staticMounts?: readonly StaticMount[];
+    /** Handlers asked before the REST contract, such as the one serving evidence files. */
+    handlers?: readonly TimelineRequestHandler[];
 }
 
 const STATUS_NOT_FOUND = 404;
@@ -24,7 +30,7 @@ const STATUS_NOT_FOUND = 404;
  * A plain Node HTTP server answering the REST contract and, optionally, a few static folders.
  */
 export function createTimelineServer(options: TimelineServerOptions): Server {
-    const handlers: TimelineRequestHandler[] = [createTimelineHandler(options)];
+    const handlers: TimelineRequestHandler[] = [...(options.handlers ?? []), createTimelineHandler(options)];
     if (options.staticMounts && options.staticMounts.length > 0) {
         handlers.push(createStaticHandler(options.staticMounts));
     }

@@ -17,7 +17,7 @@ import { IconSet } from "./icons/icon-set.js";
 import { Access } from "./panels.js";
 import type { TimelinePermissions } from "./panels.js";
 import { Preferences, defaultPreferenceStorage } from "./preferences.js";
-import { RelabeledTimelineApi } from "./relabeled-api.js";
+import { relabelApi } from "./relabeled-api.js";
 import { SettingsScope, isHexColor, settingsCatalog, settingsTokens, type AppSettings } from "./settings.js";
 import { settingsDialog } from "./settings-dialog.js";
 import { ColorScheme, detectPageTheme, watchPageTheme } from "./theme-detection.js";
@@ -184,7 +184,7 @@ class TimelineApp implements TimelineAppHandle {
         this.preferences = new Preferences(options.preferences === undefined ? defaultPreferenceStorage() : options.preferences, options.preferenceKey ?? DEFAULT_PREFERENCE_KEY);
         // Names and icons chosen for lists the catalog owner keeps, and for the views, are applied here in every scope
         this.api = this.settings() !== null
-            ? new RelabeledTimelineApi(options.api, () => this.preferences.settings)
+            ? relabelApi(options.api, () => this.preferences.settings)
             : options.api;
         const themeToggle = options.themeToggle ?? true;
         this.theme = (themeToggle ? this.preferences.theme : null) ?? options.theme ?? ThemeMode.Auto;
