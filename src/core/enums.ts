@@ -222,7 +222,9 @@ export enum LinkKind {
     Exfiltration = "Exfiltration",
     CommandAndControl = "CommandAndControl",
     Communication = "Communication",
-    Trusts = "Trusts"
+    Trusts = "Trusts",
+    /** A relationship none of the others names. Its label carries the wording. */
+    Other = "Other"
 }
 
 /*

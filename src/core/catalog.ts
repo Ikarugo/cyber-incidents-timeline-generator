@@ -271,7 +271,8 @@ const LINK_KINDS: Readonly<Record<LinkKind, LinkKindInfo>> = {
     [LinkKind.Exfiltration]: { kind: LinkKind.Exfiltration, label: "exfiltrated to", directed: true },
     [LinkKind.CommandAndControl]: { kind: LinkKind.CommandAndControl, label: "beacons to", directed: true },
     [LinkKind.Communication]: { kind: LinkKind.Communication, label: "communicates with", directed: false },
-    [LinkKind.Trusts]: { kind: LinkKind.Trusts, label: "trusts", directed: false }
+    [LinkKind.Trusts]: { kind: LinkKind.Trusts, label: "trusts", directed: false },
+    [LinkKind.Other]: { kind: LinkKind.Other, label: "relates to", directed: true }
 };
 
 const OUTCOMES: Readonly<Record<StepOutcome, OutcomeInfo>> = {
