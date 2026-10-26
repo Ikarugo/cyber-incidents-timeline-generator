@@ -746,7 +746,13 @@ class Workspace implements TimelineHandle {
         const disclosure = this.disclosureLock === null
             ? this.cycleButton(disclosureChoices(this.strings), filters.disclosure, filters.disclosure !== Disclosure.Full, value => this.applyFilters({ disclosure: value }))
             : null;
-        this.elements.filters.replaceChildren(...[audience, milestones, disclosure].flatMap(control => (control ? [control] : [])));
+        const chosen = this.preferences.choices(this.representation);
+        const quick = this.renderer.options(this.strings).flatMap(setting => {
+            if (setting.kind === OptionKind.List || !setting.quick) return [];
+            const value = this.chosenValue(setting, chosen);
+            return [this.cycleButton(setting.choices, value, value !== setting.fallback, next => this.setOption(this.representation, setting.id, next))];
+        });
+        this.elements.filters.replaceChildren(...[audience, milestones, disclosure].flatMap(control => (control ? [control] : [])), ...quick);
         if (this.elements.addButton) this.elements.addButton.hidden = this.masksPanels;
         this.renderSettings();
     }

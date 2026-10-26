@@ -58,6 +58,8 @@ export interface RendererOption<TValue extends string = string> extends OptionBa
     kind?: OptionKind.Choice;
     fallback: TValue;
     choices: readonly RendererChoice<TValue>[];
+    /** Also offered in the toolbar beside the shared filters, for a setting changed often enough to earn it. */
+    quick?: boolean;
 }
 
 /**

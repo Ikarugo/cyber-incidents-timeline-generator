@@ -50,6 +50,7 @@ function layoutOption(strings: Strings): RendererOption<GraphLayout> {
         label: strings.options.layout,
         description: strings.options.layoutDescription,
         fallback: GraphLayout.Bands,
+        quick: true,
         choices: [
             { value: GraphLayout.Bands, label: strings.options.layoutBands },
             { value: GraphLayout.Network, label: strings.options.layoutNetwork }
