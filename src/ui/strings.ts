@@ -157,8 +157,10 @@ export interface InspectorStrings {
     relationship: string;
     from: string;
     to: string;
+    otherRelationship: string;
     label: string;
     labelHint: string;
+    anyRecord: string;
     none: string;
     nothing: string;
 }
@@ -202,6 +204,9 @@ export interface OptionStrings {
     labels: string;
     labelsShown: string;
     labelsHidden: string;
+    grouping: string;
+    groupingHub: string;
+    groupingPairs: string;
     compare: string;
     compareBreakdown: string;
     compareAgainstTarget: string;
@@ -211,6 +216,7 @@ export interface OptionStrings {
     detailDescription: string;
     layoutDescription: string;
     labelsDescription: string;
+    groupingDescription: string;
     compareDescription: string;
     rows: string;
     rowsDescription: string;
@@ -715,8 +721,10 @@ export const DEFAULT_STRINGS: Strings = {
         relationship: "Relationship",
         from: "From",
         to: "To",
+        otherRelationship: "Other",
         label: "Label",
-        labelHint: "Wording on the edge",
+        labelHint: "How it reads on the edge, such as clicked",
+        anyRecord: "Pick at least one",
         none: "None",
         nothing: "Nothing"
     },
@@ -755,6 +763,9 @@ export const DEFAULT_STRINGS: Strings = {
         labels: "Labels",
         labelsShown: "Labels shown",
         labelsHidden: "Labels hidden",
+        grouping: "Shared links",
+        groupingHub: "Joined at one label",
+        groupingPairs: "One arrow per pair",
         compare: "Compare",
         compareBreakdown: "Where the time went",
         compareAgainstTarget: "Against target",
@@ -764,6 +775,7 @@ export const DEFAULT_STRINGS: Strings = {
         detailDescription: "Compact names the tactics only. Detailed lists the steps under each one.",
         layoutDescription: "Bands lines the records up by party. Network lets the connections decide where each one sits.",
         labelsDescription: "Writes the kind of each connection on its line. Hide them when the map gets crowded.",
+        groupingDescription: "How a link between several records is drawn. Joined gathers its lines at one label, One arrow per pair draws and names every pair on its own.",
         compareDescription: "What the response times are measured against.",
         rows: "Rows",
         rowsDescription: "Compact rows fit more steps on each slide and in each page of a print.",

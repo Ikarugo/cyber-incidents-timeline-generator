@@ -141,7 +141,7 @@ describe("maskDiagram", () => {
         const step = await service.createStep(incident.id, {
             title: SENTINEL, timestamp: STEP_AT, description: SENTINEL, evidenceSource: SENTINEL, tags: [SENTINEL], externalId: SENTINEL, metadata: { owner: SENTINEL }
         });
-        await service.createLink(incident.id, { sourceNodeId: node.id, targetNodeId: other.id, label: SENTINEL, stepId: step.id, metadata: { owner: SENTINEL } });
+        await service.createLink(incident.id, { sourceNodeIds: [node.id], targetNodeIds: [other.id], label: SENTINEL, stepId: step.id, metadata: { owner: SENTINEL } });
         const diagram = await service.getDiagram(incident.id);
 
         const masker = new Masker(diagram, rules());

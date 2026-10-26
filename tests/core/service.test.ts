@@ -77,7 +77,7 @@ describe("TimelineService", () => {
             title: "Step", timestamp: LATER, sourceNodeId: member.id, targetNodeId: outsider.id,
             involvements: [{ nodeId: company.id, involvement: Involvement.Affected }]
         });
-        await service.createLink(incident.id, { sourceNodeId: member.id, targetNodeId: outsider.id, kind: LinkKind.Owns });
+        await service.createLink(incident.id, { sourceNodeIds: [member.id], targetNodeIds: [outsider.id], kind: LinkKind.Owns });
 
         await service.deleteNode(incident.id, company.id);
 
@@ -90,13 +90,43 @@ describe("TimelineService", () => {
         assert.deepEqual(kept?.involvements, []);
     });
 
+    it("keeps a many to many relationship until one of its ends has no record left", async () => {
+        const { service } = createService();
+        const incident = await createIncident(service);
+        const first = await service.createNode(incident.id, person("First"));
+        const second = await service.createNode(incident.id, person("Second"));
+        const site = await service.createNode(incident.id, { name: "Phishing site", kind: NodeKind.Domain });
+        const mirror = await service.createNode(incident.id, { name: "Mirror site", kind: NodeKind.Domain });
+        const link = await service.createLink(incident.id, {
+            sourceNodeIds: [first.id, second.id], targetNodeIds: [site.id, mirror.id], kind: LinkKind.Other, label: "clicked"
+        });
+        const ends = async (): Promise<number[][][]> => (await service.getDiagram(incident.id)).links.map(entry => [[entry.id], entry.sourceNodeIds, entry.targetNodeIds]);
+
+        await service.deleteNode(incident.id, first.id);
+        await service.deleteNode(incident.id, mirror.id);
+        assert.deepEqual(await ends(), [[[link.id], [second.id], [site.id]]]);
+
+        await service.deleteNode(incident.id, site.id);
+        assert.deepEqual(await ends(), []);
+    });
+
+    it("refuses a relationship with an empty end or a record on both ends", async () => {
+        const { service } = createService();
+        const incident = await createIncident(service);
+        const a = await service.createNode(incident.id, person("A"));
+        const b = await service.createNode(incident.id, person("B"));
+        await assert.rejects(service.createLink(incident.id, { sourceNodeIds: [], targetNodeIds: [b.id] }), ValidationError);
+        await assert.rejects(service.createLink(incident.id, { sourceNodeIds: [a.id], targetNodeIds: [] }), ValidationError);
+        await assert.rejects(service.createLink(incident.id, { sourceNodeIds: [a.id, b.id], targetNodeIds: [b.id] }), ValidationError);
+    });
+
     it("removes the relationships a step established along with it", async () => {
         const { service } = createService();
         const incident = await createIncident(service);
         const a = await service.createNode(incident.id, person("A"));
         const b = await service.createNode(incident.id, person("B"));
         const step = await service.createStep(incident.id, { title: "Step", timestamp: LATER });
-        await service.createLink(incident.id, { sourceNodeId: a.id, targetNodeId: b.id, stepId: step.id });
+        await service.createLink(incident.id, { sourceNodeIds: [a.id], targetNodeIds: [b.id], stepId: step.id });
 
         await service.deleteStep(incident.id, step.id);
         assert.equal((await service.getDiagram(incident.id)).links.length, 0);

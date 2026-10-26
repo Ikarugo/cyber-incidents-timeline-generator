@@ -48,6 +48,7 @@ export class FieldLimits {
     static readonly Tags = 30;
     static readonly Audiences = 20;
     static readonly Involvements = 200;
+    static readonly LinkEnds = 200;
     static readonly OrderIndex = 1000000;
     static readonly LinkLabel = 200;
     static readonly LayoutEntries = 1000;
@@ -269,6 +270,21 @@ export class FieldReader {
         return this.integer(field, 1, Number.MAX_SAFE_INTEGER);
     }
 
+    /** A list of distinct ids holding at least one. */
+    idList(field: string, maxItems: number): RecordId[] | undefined {
+        const value = this.value(field);
+        if (value === undefined) return undefined;
+        if (!Array.isArray(value) || value.length === 0 || value.length > maxItems) {
+            return this.fail(field, `must be a list of 1 to ${maxItems} ids`);
+        }
+        const kept: RecordId[] = [];
+        for (const entry of value) {
+            if (typeof entry !== "number" || !Number.isInteger(entry) || entry < 1) return this.fail(field, "must only hold ids");
+            if (!kept.includes(entry)) kept.push(entry);
+        }
+        return kept;
+    }
+
     nullableId(field: string): RecordId | null | undefined {
         return this.value(field) === null ? null : this.id(field);
     }
@@ -426,7 +442,7 @@ function stepDefaults(rules: ValidationRules): Omit<StepFields, "title" | "times
     };
 }
 
-function linkDefaults(rules: ValidationRules): Omit<LinkFields, "sourceNodeId" | "targetNodeId"> {
+function linkDefaults(rules: ValidationRules): Omit<LinkFields, "sourceNodeIds" | "targetNodeIds"> {
     return {
         kind: rules.defaultLinkKind,
         label: null,
@@ -527,8 +543,8 @@ function readStepPatch(reader: FieldReader, rules: ValidationRules): Partial<Ste
 
 function readLinkPatch(reader: FieldReader, rules: ValidationRules): Partial<LinkFields> {
     return definedOnly<LinkFields>({
-        sourceNodeId: reader.id("sourceNodeId"),
-        targetNodeId: reader.id("targetNodeId"),
+        sourceNodeIds: reader.idList("sourceNodeIds", FieldLimits.LinkEnds),
+        targetNodeIds: reader.idList("targetNodeIds", FieldLimits.LinkEnds),
         kind: reader.oneOf("kind", rules.linkKinds),
         label: reader.nullableText("label", FieldLimits.LinkLabel),
         confidence: reader.oneOf("confidence", rules.confidences),
@@ -601,7 +617,7 @@ export function readStepUpdate(value: unknown, rules: ValidationRules = DEFAULT_
 export function readLinkCreate(value: unknown, rules: ValidationRules = DEFAULT_VALIDATION_RULES): LinkFields {
     const reader = new FieldReader(value);
     const patch = readLinkPatch(reader, rules);
-    if (!reader.requireAll(patch, ["sourceNodeId", "targetNodeId"])) {
+    if (!reader.requireAll(patch, ["sourceNodeIds", "targetNodeIds"])) {
         throw reader.error();
     }
     return { ...linkDefaults(rules), ...patch };

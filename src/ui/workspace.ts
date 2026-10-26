@@ -240,8 +240,8 @@ function remapDraft(draft: RecordDraft, history: History): RecordDraft {
 function remapLink(input: LinkCreateInput, history: History): LinkCreateInput {
     return {
         ...input,
-        sourceNodeId: history.resolve(RecordType.Node, input.sourceNodeId),
-        targetNodeId: history.resolve(RecordType.Node, input.targetNodeId),
+        sourceNodeIds: input.sourceNodeIds.map(id => history.resolve(RecordType.Node, id)),
+        targetNodeIds: input.targetNodeIds.map(id => history.resolve(RecordType.Node, id)),
         stepId: resolveOptional(history, RecordType.Step, input.stepId ?? null)
     };
 }
@@ -257,6 +257,8 @@ interface Captured {
     draft: RecordDraft;
     id: RecordId;
     links: LinkCreateInput[];
+    /** Links that outlive the record because they keep other sources, and only need it back among them. */
+    sharedLinks: { linkId: RecordId; sourceNodeIds: RecordId[]; targetNodeIds: RecordId[] }[];
     references: { stepId: RecordId; asSource: boolean; asTarget: boolean }[];
 }
 
@@ -1377,10 +1379,14 @@ class Workspace implements TimelineHandle {
             case RecordType.Node: {
                 const node = store.node(id);
                 if (!node) return null;
+                const touched = store.links.filter(link => link.sourceNodeIds.includes(id) || link.targetNodeIds.includes(id));
+                const onlyEnd = (ends: readonly RecordId[]): boolean => ends.length === 1 && ends[0] === id;
+                const shared = touched.filter(link => !onlyEnd(link.sourceNodeIds) && !onlyEnd(link.targetNodeIds));
                 return {
                     draft: { type, input: nodeFieldsOf(node) },
                     id,
-                    links: store.links.filter(link => link.sourceNodeId === id || link.targetNodeId === id).map(linkFieldsOf),
+                    links: touched.filter(link => !shared.includes(link)).map(linkFieldsOf),
+                    sharedLinks: shared.map(link => ({ linkId: link.id, sourceNodeIds: [...link.sourceNodeIds], targetNodeIds: [...link.targetNodeIds] })),
                     references: store.steps
                         .filter(step => step.sourceNodeId === id || step.targetNodeId === id)
                         .map(step => ({ stepId: step.id, asSource: step.sourceNodeId === id, asTarget: step.targetNodeId === id }))
@@ -1393,13 +1399,14 @@ class Workspace implements TimelineHandle {
                     draft: { type, input: stepFieldsOf(withoutMoments(step)) },
                     id,
                     links: store.links.filter(link => link.stepId === id).map(linkFieldsOf),
+                    sharedLinks: [],
                     references: []
                 };
             }
             case RecordType.Link: {
                 const link = store.link(id);
                 if (!link) return null;
-                return { draft: { type, input: linkFieldsOf(link) }, id, links: [], references: [] };
+                return { draft: { type, input: linkFieldsOf(link) }, id, links: [], sharedLinks: [], references: [] };
             }
         }
     }
@@ -1410,6 +1417,12 @@ class Workspace implements TimelineHandle {
 
         for (const link of captured.links) {
             await this.api.createLink(this.incidentId, remapLink(link, history));
+        }
+        for (const shared of captured.sharedLinks) {
+            await this.api.updateLink(this.incidentId, history.resolve(RecordType.Link, shared.linkId), {
+                sourceNodeIds: shared.sourceNodeIds.map(id => history.resolve(RecordType.Node, id)),
+                targetNodeIds: shared.targetNodeIds.map(id => history.resolve(RecordType.Node, id))
+            });
         }
         for (const reference of captured.references) {
             await this.api.updateStep(this.incidentId, history.resolve(RecordType.Step, reference.stepId), {

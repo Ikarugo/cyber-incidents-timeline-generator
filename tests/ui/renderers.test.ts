@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { before, describe, it } from "node:test";
-import { Representation } from "../../src/core/enums.js";
+import { LinkKind, NodeKind, Representation, Side } from "../../src/core/enums.js";
 import type { Diagram } from "../../src/core/models.js";
 import { TimeFormats } from "../../src/core/time.js";
 import { DiagramStore } from "../../src/ui/diagram-store.js";
@@ -13,6 +13,9 @@ import { Palette } from "../../src/ui/theme.js";
 import { CUSTOM_SCALE, createIncident, createService, seededService } from "../support/fixtures.js";
 
 const CUSTOM_TITLE = "Custom slide title";
+const HUB_LABEL = "clicked";
+const GROUPING_OPTION = "grouping";
+const PAIRS_GROUPING = "pairs";
 import { installDom } from "../support/dom.js";
 
 const STEP_SELECTOR = "[data-step-id]";
@@ -84,6 +87,38 @@ describe("built in renderers", () => {
                 assert.ok(lines.length > 0);
                 assert.equal(page.querySelectorAll("[data-link-id] .tlg-hit").length, lines.length);
             });
+        });
+    });
+
+    it("gathers a link joining several records at one hub, meeting each record once and naming it once", async () => {
+        const seeded = await seededService();
+        const { service, incident } = seeded;
+        const person = (name: string): Promise<{ id: number }> => service.createNode(incident.id, { name, kind: NodeKind.Person, side: Side.Victim });
+        const domain = (name: string): Promise<{ id: number }> => service.createNode(incident.id, { name, kind: NodeKind.Domain, side: Side.Attacker });
+        const sources = [await person("Alice"), await person("Bob"), await person("Chloe")];
+        const targets = [await domain("portal.example"), await domain("cdn.example")];
+        const link = await service.createLink(incident.id, {
+            sourceNodeIds: sources.map(node => node.id), targetNodeIds: targets.map(node => node.id), kind: LinkKind.Other, label: HUB_LABEL
+        });
+        const store = new DiagramStore();
+        store.load(await service.getDiagram(incident.id));
+        const graph = BUILT_IN_RENDERERS.find(renderer => renderer.representation === Representation.RelationshipGraph);
+        assert.ok(graph);
+
+        const pairs = sources.length * targets.length;
+        optionSets(graph).forEach(options => {
+            const page = drawAll(store, graph, options).find(drawn => drawn.querySelector(`[data-link-id="${link.id}"]`));
+            assert.ok(page);
+            const lines = [...page.querySelectorAll(`[data-link-id="${link.id}"] .tlg-link-line`)];
+            const arrows = lines.filter(line => line.getAttribute("marker-end") !== null).length;
+            const labels = textsOf(page).filter(text => text === HUB_LABEL).length;
+            if (options.get(GROUPING_OPTION) === PAIRS_GROUPING) {
+                assert.deepEqual([lines.length, arrows], [pairs, pairs]);
+                assert.ok(labels === 0 || labels === pairs);
+            } else {
+                assert.deepEqual([lines.length, arrows], [sources.length + targets.length, targets.length]);
+                assert.ok(labels <= 1);
+            }
         });
     });
 

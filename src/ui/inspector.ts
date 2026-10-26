@@ -4,13 +4,13 @@
 // place, so the other fields keep what was typed in them and the scroll position stays where it was.
 
 import { impactLevelsOf } from "../core/catalog.js";
-import { RecordType, Side, type SideKey } from "../core/enums.js";
+import { LinkKind, RecordType, Side, type SideKey } from "../core/enums.js";
 import { Icon } from "../core/icon.js";
 import type { DiagramLink, DiagramNode, LinkUpdateInput, NodeUpdateInput, RecordId, StepUpdateInput } from "../core/models.js";
 import { joinWallClock, splitWallClock } from "../core/time.js";
 import type { Selection, TimelineStep } from "./diagram-store.js";
 import { h } from "./dom.js";
-import { button, checkbox, dateAndTime, field, multiSelect, recordSelect, row, select, tagChips, textArea, textInput, type Choice, type SelectOptions } from "./forms.js";
+import { button, checkbox, dateAndTime, field, multiSelect, recordMultiSelect, recordSelect, row, select, tagChips, textArea, textInput, type Choice, type SelectOptions } from "./forms.js";
 import type { PanelContext } from "./panels.js";
 
 type InspectedRecord =
@@ -101,7 +101,7 @@ export class Inspector {
             case RecordType.Step:
                 return inspected.record.title;
             case RecordType.Link:
-                return `${store.node(inspected.record.sourceNodeId)?.name ?? "?"} to ${store.node(inspected.record.targetNodeId)?.name ?? "?"}`;
+                return store.linkTitle(inspected.record);
         }
     }
 
@@ -119,7 +119,8 @@ export class Inspector {
 
     private sideOf(inspected: InspectedRecord): SideKey {
         if (inspected.type === RecordType.Link) {
-            return this.context.store.node(inspected.record.sourceNodeId)?.side ?? Side.Unknown;
+            const [source] = this.context.store.linkSources(inspected.record);
+            return source?.side ?? Side.Unknown;
         }
         return inspected.record.side;
     }
@@ -288,20 +289,65 @@ export class Inspector {
         return container;
     }
 
+    /**
+     * Each end offers every record the other end does not hold. Picking on one end rebuilds only the other,
+     * so the list being picked from stays open. The label only shows for Other, or when a link carries one.
+     */
     private linkFields(container: HTMLElement, link: DiagramLink): void {
         const { store, actions } = this.context;
         const w = this.context.strings.inspector;
-        const save = (patch: LinkUpdateInput): void => actions.edit(link.id, { type: RecordType.Link, patch });
-        const nodes = store.nodes;
+        const options: SelectOptions = { emptyLabel: w.anyRecord, strings: this.context.strings.forms };
+        let current = link;
+        const save = (patch: LinkUpdateInput): void => {
+            current = { ...current, ...patch };
+            actions.edit(current.id, { type: RecordType.Link, patch });
+        };
 
+        const swap = (shown: HTMLElement, next: HTMLElement): HTMLElement => {
+            shown.replaceWith(next);
+            return next;
+        };
+        // An end left empty is refused and put back as it was, which closes its list
+        const pickSources = (values: RecordId[]): void => {
+            if (values.length === 0) {
+                from = swap(from, fromField());
+                return;
+            }
+            save({ sourceNodeIds: values });
+            to = swap(to, toField());
+        };
+        const pickTargets = (values: RecordId[]): void => {
+            if (values.length === 0) {
+                to = swap(to, toField());
+                return;
+            }
+            save({ targetNodeIds: values });
+            from = swap(from, fromField());
+        };
+
+        const fromField = (): HTMLElement => field(w.from, recordMultiSelect(current.sourceNodeIds, store.nodes.filter(node => !current.targetNodeIds.includes(node.id)), pickSources, options));
+        const toField = (): HTMLElement => field(w.to, recordMultiSelect(current.targetNodeIds, store.nodes.filter(node => !current.sourceNodeIds.includes(node.id)), pickTargets, options));
+        let from = fromField();
+        let to = toField();
+
+        const label = h("div");
+        const paintLabel = (): void => {
+            label.replaceChildren(...(current.kind === LinkKind.Other || current.label !== null
+                ? [field(w.label, textInput(current.label, value => save({ label: value }), w.labelHint))]
+                : []));
+        };
+        paintLabel();
+
+        const kinds = store.catalog.linkKinds.map(entry => ({ value: entry.kind, label: entry.kind === LinkKind.Other ? w.otherRelationship : entry.label }));
         container.append(
-            row(
-                field(w.from, this.pickRecord(link.sourceNodeId, nodes, value => { if (value !== null) save({ sourceNodeId: value }); })),
-                field(w.to, this.pickRecord(link.targetNodeId, nodes, value => { if (value !== null) save({ targetNodeId: value }); }))
-            ),
-            field(w.relationship, this.pick(link.kind, store.catalog.linkKinds.map(entry => ({ value: entry.kind, label: entry.label })), value => { if (value) save({ kind: value }); })),
-            field(w.label, textInput(link.label, value => save({ label: value }), w.labelHint)),
-            field(w.confidence, this.pick(link.confidence, store.catalog.confidences, value => { if (value) save({ confidence: value }); }))
+            row(from, to),
+            field(w.relationship, this.pick(current.kind, kinds, value => {
+                if (!value) return;
+                save(value === LinkKind.Other ? { kind: value } : { kind: value, label: null });
+                paintLabel();
+            })),
+            label,
+            field(w.confidence, this.pick(current.confidence, store.catalog.confidences, value => { if (value) save({ confidence: value }); }))
         );
     }
 

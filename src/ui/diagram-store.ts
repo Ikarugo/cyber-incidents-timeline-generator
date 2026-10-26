@@ -57,6 +57,14 @@ import type { RepresentationKey } from "../core/enums.js";
 /**
  * A step with its moments parsed once, so renderers compare dates rather than strings.
  */
+/** One drawn line of a link. A link is drawn once from each of its sources to each of its targets. */
+export interface LinkEdge {
+    key: string;
+    link: DiagramLink;
+    sourceNodeId: RecordId;
+    targetNodeId: RecordId;
+}
+
 export interface TimelineStep extends DiagramStep {
     at: Date | null;
     until: Date | null;
@@ -224,6 +232,25 @@ export class DiagramStore {
 
     link(id: RecordId): DiagramLink | null {
         return this.links.find(link => link.id === id) ?? null;
+    }
+
+    linkEdges(): LinkEdge[] {
+        return this.links.flatMap(link => link.sourceNodeIds.flatMap(sourceNodeId => link.targetNodeIds.map(targetNodeId => ({
+            key: `${link.id}:${sourceNodeId}:${targetNodeId}`, link, sourceNodeId, targetNodeId
+        }))));
+    }
+
+    linkSources(link: DiagramLink): DiagramNode[] {
+        return link.sourceNodeIds.flatMap(id => this.node(id) ?? []);
+    }
+
+    linkTargets(link: DiagramLink): DiagramNode[] {
+        return link.targetNodeIds.flatMap(id => this.node(id) ?? []);
+    }
+
+    linkTitle(link: DiagramLink): string {
+        const names = (nodes: readonly DiagramNode[]): string => nodes.map(node => node.name).join(", ") || "?";
+        return `${names(this.linkSources(link))} to ${names(this.linkTargets(link))}`;
     }
 
     kindInfo(kind: NodeKindKey): NodeKindInfo {

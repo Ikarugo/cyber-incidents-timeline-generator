@@ -435,7 +435,7 @@ await api.createStep(incident.id, {
     targetNodeId: host.id
 });
 
-await api.createLink(incident.id, { sourceNodeId: soc.id, targetNodeId: host.id, kind: LinkKind.Manages });
+await api.createLink(incident.id, { sourceNodeIds: [soc.id], targetNodeIds: [host.id], kind: LinkKind.Manages });
 ```
 
 Incidents carry no dates of their own. Everything timed is a step, and the response figures come from the steps

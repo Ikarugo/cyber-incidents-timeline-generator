@@ -127,7 +127,7 @@ export class Rail {
 
     private linkMatches(link: DiagramLink): boolean {
         const { store } = this.context;
-        return this.matches(store.node(link.sourceNodeId)?.name ?? null) || this.matches(store.node(link.targetNodeId)?.name ?? null);
+        return [...store.linkSources(link), ...store.linkTargets(link)].some(node => this.matches(node.name));
     }
 
     private appendGroup<TRecord>(fragment: DocumentFragment, label: string, records: readonly TRecord[], rowsFor: (record: TRecord) => HTMLElement[], topLevel = false): void {
@@ -329,12 +329,10 @@ export class Rail {
 
     private linkRow(link: DiagramLink): HTMLDivElement {
         const { store } = this.context;
-        const source = store.node(link.sourceNodeId);
-        const target = store.node(link.targetNodeId);
-        const name = `${source?.name ?? "?"} to ${target?.name ?? "?"}`;
+        const [source] = store.linkSources(link);
         return this.row({
             type: RecordType.Link, id: link.id, icon: Icon.Link, side: source?.side ?? Side.Unknown,
-            name, meta: link.label ?? store.linkKindInfo(link.kind).label, child: false
+            name: store.linkTitle(link), meta: link.label ?? store.linkKindInfo(link.kind).label, child: false
         });
     }
 
@@ -454,7 +452,7 @@ export class Rail {
         }
         const id = await this.context.actions.create({
             type: RecordType.Link,
-            input: { sourceNodeId: first.id, targetNodeId: second.id, kind: this.context.store.vocabulary.defaultLinkKind }
+            input: { sourceNodeIds: [first.id], targetNodeIds: [second.id], kind: this.context.store.vocabulary.defaultLinkKind }
         });
         if (id !== null) this.context.store.setSelection({ type: RecordType.Link, id });
     }

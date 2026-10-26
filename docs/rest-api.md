@@ -66,7 +66,7 @@ the base path, `/api` by default.
 | `IncidentCreateInput` | `title` |
 | `NodeCreateInput` | `name`, `kind` |
 | `StepCreateInput` | `title`, `timestamp` |
-| `LinkCreateInput` | `sourceNodeId`, `targetNodeId` |
+| `LinkCreateInput` | `sourceNodeIds`, `targetNodeIds` (each a list of 1 to 200 distinct record ids, no record on both sides) |
 | `LayoutInput` | `nodeId`, `representation`, `x`, `y` (both `null` to release a pinned record) |
 
 ### Moving a whole timeline

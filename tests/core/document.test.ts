@@ -10,6 +10,7 @@ import { seededService } from "../support/fixtures.js";
 
 const MILESTONES = [{ key: "first_access", label: "First access" }];
 const FIRST = "2026-01-12T08:00";
+const SINGLE_END_VERSION = 1;
 
 function service(): TimelineService {
     return new TimelineService(new MemoryTimelineStore(), { catalog: buildCatalog({ milestones: MILESTONES }) });
@@ -61,7 +62,7 @@ describe("a timeline as a document", () => {
             title: "Opened the attachment", timestamp: FIRST, sourceNodeId: clerk.id, targetNodeId: host.id,
             outcome: StepOutcome.Succeeded, involvements: [{ nodeId: company.id, involvement: Involvement.Affected }]
         });
-        await built.createLink(incident.id, { sourceNodeId: clerk.id, targetNodeId: host.id, kind: LinkKind.AccessGrantedTo });
+        await built.createLink(incident.id, { sourceNodeIds: [clerk.id], targetNodeIds: [host.id], kind: LinkKind.AccessGrantedTo });
 
         const into = new TimelineService(new MemoryTimelineStore());
         const report = await into.importDocument(await built.exportDocument(incident.id));
@@ -76,7 +77,34 @@ describe("a timeline as a document", () => {
         assert.equal(step?.sourceNodeId, rebuiltClerk?.id);
         assert.equal(step?.targetNodeId, rebuiltHost?.id);
         assert.deepEqual(step?.involvements, [{ nodeId: rebuiltCompany?.id, involvement: Involvement.Affected }]);
-        assert.equal(diagram.links[0]?.sourceNodeId, rebuiltClerk?.id);
+        assert.deepEqual(diagram.links[0]?.sourceNodeIds, [rebuiltClerk?.id]);
+    });
+
+    it("keeps every end of a link, and reads the single ends of a first version document", async () => {
+        const built = service();
+        const incident = await built.createIncident({ title: "Incident" });
+        const first = await built.createNode(incident.id, { name: "First", kind: NodeKind.Person });
+        const second = await built.createNode(incident.id, { name: "Second", kind: NodeKind.Person });
+        const site = await built.createNode(incident.id, { name: "Site", kind: NodeKind.Domain });
+        const mirror = await built.createNode(incident.id, { name: "Mirror", kind: NodeKind.Domain });
+        await built.createLink(incident.id, { sourceNodeIds: [first.id, second.id], targetNodeIds: [site.id, mirror.id] });
+        const document = await built.exportDocument(incident.id);
+
+        const into = new TimelineService(new MemoryTimelineStore());
+        const names = async (incidentId: number): Promise<string[][]> => {
+            const diagram = await into.getDiagram(incidentId);
+            const named = (ids: readonly number[]): string[] => ids.map(id => diagram.nodes.find(node => node.id === id)?.name ?? "");
+            const [link] = diagram.links;
+            return link ? [named(link.sourceNodeIds), named(link.targetNodeIds)] : [];
+        };
+        assert.deepEqual(await names((await into.importDocument(document)).incidentId), [["First", "Second"], ["Site", "Mirror"]]);
+
+        const earlier = {
+            ...document,
+            version: SINGLE_END_VERSION,
+            links: document.links.map(({ sources, targets, ...rest }) => ({ ...rest, source: sources[0], target: targets[0] }))
+        };
+        assert.deepEqual(await names((await into.importDocument(earlier)).incidentId), [["First"], ["Site"]]);
     });
 
     it("recognises a record it already holds when merging, and adds it twice when not", async () => {

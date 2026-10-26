@@ -11,6 +11,8 @@ export class TableNames {
     readonly involvements: string;
     readonly tags: string;
     readonly links: string;
+    readonly linkSources: string;
+    readonly linkTargets: string;
     readonly catalogSettings: string;
 
     /**
@@ -34,6 +36,8 @@ export class TableNames {
         this.involvements = `${qualified}step_involvements`;
         this.tags = `${qualified}step_tags`;
         this.links = `${qualified}links`;
+        this.linkSources = `${qualified}link_sources`;
+        this.linkTargets = `${qualified}link_targets`;
         this.catalogSettings = `${qualified}catalog_settings`;
     }
 }
@@ -143,8 +147,6 @@ CREATE TABLE IF NOT EXISTS ${tables.tags} (
 CREATE TABLE IF NOT EXISTS ${tables.links} (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     incident_id INTEGER NOT NULL REFERENCES ${tables.incidents}(id) ON DELETE CASCADE,
-    source_node_id INTEGER NOT NULL REFERENCES ${tables.nodes}(id) ON DELETE CASCADE,
-    target_node_id INTEGER NOT NULL REFERENCES ${tables.nodes}(id) ON DELETE CASCADE,
     kind TEXT NOT NULL,
     label TEXT NULL,
     confidence TEXT NOT NULL,
@@ -152,6 +154,20 @@ CREATE TABLE IF NOT EXISTS ${tables.links} (
     metadata TEXT NULL
 );
 CREATE INDEX IF NOT EXISTS ${tables.links}_incident ON ${tables.links}(incident_id);
+
+CREATE TABLE IF NOT EXISTS ${tables.linkSources} (
+    link_id INTEGER NOT NULL REFERENCES ${tables.links}(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    node_id INTEGER NOT NULL REFERENCES ${tables.nodes}(id) ON DELETE CASCADE,
+    PRIMARY KEY (link_id, node_id)
+);
+
+CREATE TABLE IF NOT EXISTS ${tables.linkTargets} (
+    link_id INTEGER NOT NULL REFERENCES ${tables.links}(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    node_id INTEGER NOT NULL REFERENCES ${tables.nodes}(id) ON DELETE CASCADE,
+    PRIMARY KEY (link_id, node_id)
+);
 
 -- The catalog settings of the deployment, as one JSON document in a single row
 CREATE TABLE IF NOT EXISTS ${tables.catalogSettings} (

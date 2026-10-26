@@ -29,19 +29,38 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// Snapshots of this version held one source and one target per link
+const SINGLE_END_VERSION = 2;
+
 function upgradeStep(step: unknown): unknown {
     if (!isRecord(step)) return step;
     const { audience, ...rest } = step;
     return { ...rest, audiences: typeof audience === "string" && audience !== Audience.Both ? [audience] : [] };
 }
 
+function upgradeLink(link: unknown): unknown {
+    if (!isRecord(link)) return link;
+    const { sourceNodeId, targetNodeId, ...rest } = link;
+    return {
+        ...rest,
+        sourceNodeIds: typeof sourceNodeId === "number" ? [sourceNodeId] : [],
+        targetNodeIds: typeof targetNodeId === "number" ? [targetNodeId] : []
+    };
+}
+
 /**
- * Brings a snapshot an earlier release wrote up to the current shape, so a browser keeps its incidents
- * across the upgrade.
+ * Brings a snapshot an earlier release wrote up to the current shape, one version at a time, so a browser
+ * keeps its incidents across the upgrade.
  */
 function upgrade(value: unknown): unknown {
-    if (!isRecord(value) || value["version"] !== SINGLE_AUDIENCE_VERSION || !Array.isArray(value["steps"])) return value;
-    return { ...value, version: SNAPSHOT_VERSION, steps: value["steps"].map(upgradeStep) };
+    if (!isRecord(value)) return value;
+    if (value["version"] === SINGLE_AUDIENCE_VERSION && Array.isArray(value["steps"])) {
+        return upgrade({ ...value, version: SINGLE_END_VERSION, steps: value["steps"].map(upgradeStep) });
+    }
+    if (value["version"] === SINGLE_END_VERSION && Array.isArray(value["links"])) {
+        return { ...value, version: SNAPSHOT_VERSION, links: value["links"].map(upgradeLink) };
+    }
+    return value;
 }
 
 function readSnapshot(storage: KeyValueStorage, key: string): StoreSnapshot {

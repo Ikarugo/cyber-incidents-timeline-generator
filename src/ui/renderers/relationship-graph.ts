@@ -22,6 +22,28 @@ enum GraphLabels {
     Hidden = "hidden"
 }
 
+enum LinkGrouping {
+    Hub = "hub",
+    Pairs = "pairs"
+}
+
+function groupingOption(strings: Strings): RendererOption<LinkGrouping> {
+    return {
+        id: "grouping",
+        label: strings.options.grouping,
+        description: strings.options.groupingDescription,
+        fallback: LinkGrouping.Hub,
+        choices: [
+            { value: LinkGrouping.Hub, label: strings.options.groupingHub },
+            { value: LinkGrouping.Pairs, label: strings.options.groupingPairs }
+        ]
+    };
+}
+
+function joinedAtHub(context: RenderContext): boolean {
+    return optionValue(context, groupingOption(context.strings)) === LinkGrouping.Hub;
+}
+
 function layoutOption(strings: Strings): RendererOption<GraphLayout> {
     return {
         id: "layout",
@@ -69,6 +91,7 @@ const TWO_COLUMN_BAND = 400;
 const LABEL_CHAR = 5.2;
 const CHORD_LABEL_CHAR = 4.9;
 const LINK_HIT_WIDTH = 12;
+const HUB_SPACING = 18;
 
 const RING_MARGIN = 132;
 const DOT_RADIUS = 7;
@@ -76,6 +99,8 @@ const LABEL_OFFSET = 15;
 const NAME_LINES = 3;
 const NAME_LINE_HEIGHT = 12;
 const CHORD_BOW = 0.42;
+// How far along its own way to the hub a spoke keeps heading for the centre before it turns
+const SPOKE_REACH = 0.5;
 const CHORD_LABEL_STOPS: readonly number[] = [0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.2, 0.8];
 
 interface Cluster extends Weighted {
@@ -95,6 +120,10 @@ type GraphPage =
     | { layout: GraphLayout.Bands; bands: BandColumn[] }
     | { layout: GraphLayout.Network; nodes: DiagramNode[] };
 
+/**
+ * A card, or the hub a link with several lines passes through. A hub has no size and sits in the gap
+ * after the band named by lastBand, so the first band to its right is the next one.
+ */
 interface BoxPosition {
     x: number;
     y: number;
@@ -102,6 +131,29 @@ interface BoxPosition {
     height: number;
     bandIndex: number;
     bandRight: number;
+    firstBand: number;
+    lastBand: number;
+}
+
+/**
+ * One drawn line, between two cards or between a card and a hub. A null id is the hub end. Only a line
+ * reaching a target carries the arrow, so a link through a hub points once into each target.
+ */
+interface Stroke {
+    key: string;
+    link: DiagramLink;
+    color: string;
+    fromId: RecordId | null;
+    toId: RecordId | null;
+    from: BoxPosition;
+    to: BoxPosition;
+    /** The lane a line into a hub runs along, the hub sitting on it, when the line has bands to cross. */
+    hubLane: number | null;
+}
+
+interface Hub {
+    link: DiagramLink;
+    at: BoxPosition;
 }
 
 interface Anchor {
@@ -122,8 +174,7 @@ interface EdgeShape {
 }
 
 interface DrawnEdge {
-    link: DiagramLink;
-    color: string;
+    stroke: Stroke;
     shape: EdgeShape;
 }
 
@@ -144,8 +195,8 @@ interface ChordCurve {
     at(t: number): Point;
 }
 
-function linkColor(context: RenderContext, link: DiagramLink): string {
-    const source = context.store.node(link.sourceNodeId);
+function linkColor(context: RenderContext, sourceNodeId: RecordId): string {
+    const source = context.store.node(sourceNodeId);
     return context.palette.side(source ? source.side : Side.Unknown).color;
 }
 
@@ -245,19 +296,18 @@ function clusterBox(context: RenderContext, cluster: Cluster, x: number, y: numb
  * its edge on top of each other, so they are spread down the side in the order of the cards they reach,
  * which also stops them crossing on the way out.
  */
-function anchorPoints(links: readonly DiagramLink[], positions: ReadonlyMap<RecordId, BoxPosition>): Map<RecordId, Anchor> {
-    const perNode = new Map<RecordId, { linkId: RecordId; order: number }[]>();
-    const remember = (nodeId: RecordId, linkId: RecordId, otherId: RecordId): void => {
-        const other = positions.get(otherId);
-        if (!other) return;
+function anchorPoints(strokes: readonly Stroke[], positions: ReadonlyMap<RecordId, BoxPosition>): Map<string, Anchor> {
+    const perNode = new Map<RecordId, { strokeKey: string; order: number }[]>();
+    const remember = (nodeId: RecordId | null, strokeKey: string, other: BoxPosition): void => {
+        if (nodeId === null) return;
         const entries = perNode.get(nodeId) ?? [];
-        entries.push({ linkId, order: other.y + other.height / 2 });
+        entries.push({ strokeKey, order: other.y + other.height / 2 });
         perNode.set(nodeId, entries);
     };
 
-    links.forEach(link => {
-        remember(link.sourceNodeId, link.id, link.targetNodeId);
-        remember(link.targetNodeId, link.id, link.sourceNodeId);
+    strokes.forEach(stroke => {
+        remember(stroke.fromId, stroke.key, stroke.to);
+        remember(stroke.toId, stroke.key, stroke.from);
     });
 
     const slots = new Map<string, number>();
@@ -265,17 +315,53 @@ function anchorPoints(links: readonly DiagramLink[], positions: ReadonlyMap<Reco
         const box = positions.get(nodeId);
         if (!box) return;
         entries.sort((a, b) => a.order - b.order);
-        entries.forEach((entry, index) => slots.set(`${nodeId}:${entry.linkId}`, box.y + box.height * (index + 1) / (entries.length + 1)));
+        entries.forEach((entry, index) => slots.set(`${nodeId}:${entry.strokeKey}`, box.y + box.height * (index + 1) / (entries.length + 1)));
     });
 
-    const anchors = new Map<RecordId, Anchor>();
-    links.forEach(link => {
-        anchors.set(link.id, {
-            fromY: slots.get(`${link.sourceNodeId}:${link.id}`) ?? 0,
-            toY: slots.get(`${link.targetNodeId}:${link.id}`) ?? 0
-        });
+    // A hub has no side to spread lines along, so every line meets it at its centre
+    const end = (nodeId: RecordId | null, box: BoxPosition, strokeKey: string): number => {
+        return nodeId === null ? box.y : slots.get(`${nodeId}:${strokeKey}`) ?? 0;
+    };
+    const anchors = new Map<string, Anchor>();
+    strokes.forEach(stroke => {
+        anchors.set(stroke.key, { fromY: end(stroke.fromId, stroke.from, stroke.key), toY: end(stroke.toId, stroke.to, stroke.key) });
     });
     return anchors;
+}
+
+/**
+ * Where a link with several lines gathers them. Its hub sits in the gap beside the targets, on the side
+ * the sources come from, level with the middle of every record it joins, so each record meets the link
+ * once and the lines split only on their way to the records.
+ */
+function hubPosition(
+    sources: readonly BoxPosition[],
+    targets: readonly BoxPosition[],
+    extents: readonly (Extent | undefined)[],
+    bandCount: number,
+    gapCentre: (bandIndex: number) => number
+): { at: BoxPosition; lane: number | null } {
+    const mean = (values: readonly number[]): number => values.reduce((sum, value) => sum + value, 0) / values.length;
+    const sourceBand = mean(sources.map(box => box.bandIndex));
+    const targetBands = targets.map(box => box.bandIndex);
+    const gap = sourceBand < mean(targetBands)
+        ? Math.max(0, Math.min(...targetBands) - 1)
+        : Math.min(bandCount - 1, Math.max(...targetBands));
+    const x = gapCentre(gap);
+    const middle = mean([...sources, ...targets].map(box => box.y + box.height / 2));
+
+    // Sources with bands to cross reach the hub along a lane clear of those bands. Sitting on that lane
+    // lets their trunk run straight in, where a hub off the lane would add a turn to every one of them.
+    const farthest = sources.reduce<BoxPosition | null>((far, box) => {
+        const distance = (candidate: BoxPosition): number => candidate.bandIndex < gap ? gap - candidate.bandIndex : candidate.bandIndex - gap - 1;
+        return far === null || distance(box) > distance(far) ? box : far;
+    }, null);
+    const crossing = farthest !== null && (farthest.bandIndex < gap || farthest.bandIndex > gap + 1);
+    const lane = !farthest || !crossing ? null : farthest.bandIndex < gap
+        ? clearLane(extents, farthest.bandIndex, gap + 1, { fromY: middle, toY: middle })
+        : clearLane(extents, gap, farthest.bandIndex, { fromY: middle, toY: middle });
+    const y = lane ?? middle;
+    return { at: { x, y, width: 0, height: 0, bandIndex: gap, bandRight: x, firstBand: gap + 1, lastBand: gap }, lane };
 }
 
 /**
@@ -410,29 +496,103 @@ function hitArea(d: string): SVGPathElement {
     return path(d, { class: "tlg-hit", fill: "none", stroke: "transparent", "stroke-width": LINK_HIT_WIDTH, "pointer-events": "stroke" });
 }
 
-function edgeLine(context: RenderContext, { link, color, shape }: DrawnEdge): SVGGElement {
+function edgeLine(context: RenderContext, { stroke, shape }: DrawnEdge): SVGGElement {
+    const { link, color } = stroke;
     const info = context.store.linkKindInfo(link.kind);
     return group({ class: "tlg-link", "data-link-id": link.id }, [
         hitArea(shape.path),
         path(shape.path, {
             class: "tlg-link-line", fill: "none", stroke: color, "stroke-width": 1.4, "stroke-dasharray": link.confidence === Confidence.Confirmed ? null : "5 4", opacity: 0.75,
-            "marker-end": info.directed ? `url(#${markerId(EDGE_ARROW, color)})` : null
+            "marker-end": info.directed && stroke.toId !== null ? `url(#${markerId(EDGE_ARROW, color)})` : null
         }),
-        circle(shape.x0, shape.y0, 2.5, { fill: color, opacity: 0.85 })
+        ...(stroke.fromId === null ? [] : [circle(shape.x0, shape.y0, 2.5, { fill: color, opacity: 0.85 })])
     ]);
 }
 
-function edgeLabel(context: RenderContext, { link, shape }: DrawnEdge, obstacles: readonly Point[], cards: readonly BoxPosition[], placed: PlacedLabel[]): SVGGElement {
-    const { palette, store } = context;
-    const label = link.label ?? store.linkKindInfo(link.kind).label;
-    const width = label.length * LABEL_CHAR + 10;
-    const spot = labelSpot(shape.samples, obstacles, cards, placed, width);
-    placed.push({ x: spot.x, y: spot.y, width });
+function linkWording(context: RenderContext, link: DiagramLink): string {
+    return link.label ?? context.store.linkKindInfo(link.kind).label;
+}
 
+function badge(context: RenderContext, link: DiagramLink, spot: Point, label: string, width: number): SVGGElement {
+    const { palette } = context;
     return group({ class: "tlg-link tlg-link-label", "data-link-id": link.id }, [
         rect(spot.x - width / 2, spot.y - 8, width, 15, { rx: 7.5, fill: palette.surface, opacity: 0.94 }),
         text(truncate(label, 9.5, width), spot.x, spot.y, { "font-size": 9.5, "text-anchor": "middle", "dominant-baseline": "central", fill: palette.inkMuted })
     ]);
+}
+
+function edgeLabel(context: RenderContext, { stroke: { link }, shape }: DrawnEdge, obstacles: readonly Point[], cards: readonly BoxPosition[], placed: PlacedLabel[]): SVGGElement {
+    const label = linkWording(context, link);
+    const width = label.length * LABEL_CHAR + 10;
+    const spot = labelSpot(shape.samples, obstacles, cards, placed, width);
+    placed.push({ x: spot.x, y: spot.y, width });
+    return badge(context, link, spot, label, width);
+}
+
+/**
+ * What a link with several lines means, written where its lines meet. Without labels the hub is still
+ * drawn as a dot, so the lines visibly join rather than seeming to cross.
+ */
+function hubMark(context: RenderContext, hub: Hub, shown: boolean, placed: PlacedLabel[]): SVGGElement {
+    const { link, at } = hub;
+    if (!shown) {
+        return group({ class: "tlg-link", "data-link-id": link.id }, [circle(at.x, at.y, 3.5, { fill: context.palette.inkMuted })]);
+    }
+    const label = linkWording(context, link);
+    const width = label.length * LABEL_CHAR + 10;
+    placed.push({ x: at.x, y: at.y, width });
+    return badge(context, link, at, label, width);
+}
+
+/**
+ * The lines of every link whose ends are on the page. A link joining one record to one other is a single
+ * line. Any other runs each source into a hub and the hub out to each target, so every record meets the
+ * link once however many records sit at the far end.
+ */
+function strokesOf(
+    context: RenderContext,
+    positions: ReadonlyMap<RecordId, BoxPosition>,
+    extents: readonly (Extent | undefined)[],
+    bandCount: number,
+    gapCentre: (bandIndex: number) => number
+): { strokes: Stroke[]; hubs: Hub[] } {
+    const strokes: Stroke[] = [];
+    const hubs: Hub[] = [];
+    const joined = joinedAtHub(context);
+    const placed = (ids: readonly RecordId[]): { id: RecordId; box: BoxPosition }[] => ids.flatMap(id => {
+        const box = positions.get(id);
+        return box ? [{ id, box }] : [];
+    });
+
+    context.store.links.forEach(link => {
+        const sources = placed(link.sourceNodeIds);
+        const targets = placed(link.targetNodeIds);
+        const [firstSource] = sources;
+        if (!firstSource || targets.length === 0) return;
+
+        if (!joined || (sources.length === 1 && targets.length === 1)) {
+            sources.forEach(source => targets.forEach(target => strokes.push({
+                key: `${link.id}:${source.id}:${target.id}`, link, color: linkColor(context, source.id),
+                fromId: source.id, toId: target.id, from: source.box, to: target.box, hubLane: null
+            })));
+            return;
+        }
+
+        const { at, lane } = hubPosition(sources.map(end => end.box), targets.map(end => end.box), extents, bandCount, gapCentre);
+        // Two hubs in one gap at nearly the same height would print one badge over the other
+        while (hubs.some(hub => hub.at.x === at.x && Math.abs(hub.at.y - at.y) < HUB_SPACING)) {
+            at.y += HUB_SPACING;
+        }
+        const hubLane = lane === null ? null : at.y;
+        hubs.push({ link, at });
+        sources.forEach(source => strokes.push({
+            key: `${link.id}:from:${source.id}`, link, color: linkColor(context, source.id), fromId: source.id, toId: null, from: source.box, to: at, hubLane
+        }));
+        targets.forEach(target => strokes.push({
+            key: `${link.id}:to:${target.id}`, link, color: linkColor(context, firstSource.id), fromId: null, toId: target.id, from: at, to: target.box, hubLane: null
+        }));
+    });
+    return { strokes, hubs };
 }
 
 function drawBands(context: RenderContext, bands: readonly BandColumn[], pageIndex: number, pageCount: number): SVGGElement {
@@ -496,20 +656,20 @@ function drawBands(context: RenderContext, bands: readonly BandColumn[], pageInd
                 box.setAttribute("data-draggable", "true");
                 boxes.appendChild(box);
 
-                positions.set(member.id, { x: at.x, y: at.y, width: boxWidth, height: BOX_HEIGHT, bandIndex, bandRight: bandX + bandWidth });
+                positions.set(member.id, { x: at.x, y: at.y, width: boxWidth, height: BOX_HEIGHT, bandIndex, bandRight: bandX + bandWidth, firstBand: bandIndex, lastBand: bandIndex });
             });
 
             cursor += size.height + CLUSTER_GAP;
         });
     });
 
-    const links = store.links.filter(link => positions.has(link.sourceNodeId) && positions.has(link.targetNodeId));
-    const anchors = anchorPoints(links, positions);
-    edges.appendChild(arrowMarkers(EDGE_ARROW, links.map(link => linkColor(context, link)), { refX: 9 }));
+    const gapCentre = (bandIndex: number): number => CONTENT.x + bandIndex * (bandWidth + BAND_GAP) + bandWidth + BAND_GAP / 2;
+    const { strokes, hubs } = strokesOf(context, positions, extents, drawable.length, gapCentre);
+    const anchors = anchorPoints(strokes, positions);
+    edges.appendChild(arrowMarkers(EDGE_ARROW, strokes.map(stroke => stroke.color), { refX: 9 }));
 
     // A link that stays inside one band runs out into the gap beside it on square corners, each on its own
     // track. Two of those on the same track would sit on top of each other and neither could be followed.
-    const gapCentre = (bandIndex: number): number => CONTENT.x + bandIndex * (bandWidth + BAND_GAP) + bandWidth + BAND_GAP / 2;
     const used = new Map<string, number>();
     const offset = (key: string): number => {
         const count = used.get(key) ?? 0;
@@ -517,33 +677,42 @@ function drawBands(context: RenderContext, bands: readonly BandColumn[], pageInd
         return (count % TRACKS_PER_BAND - (TRACKS_PER_BAND - 1) / 2) * TRACK_STEP;
     };
 
+    const hubLanes = new Map<string, number>();
     const drawn: DrawnEdge[] = [];
-    links.forEach(link => {
-        const from = positions.get(link.sourceNodeId);
-        const to = positions.get(link.targetNodeId);
-        const anchor = anchors.get(link.id);
-        if (!from || !to || !anchor) return;
+    strokes.forEach(stroke => {
+        const { from, to } = stroke;
+        const anchor = anchors.get(stroke.key);
+        if (!anchor) return;
+        const [left, right] = from.x <= to.x ? [from, to] : [to, from];
 
         let shape: EdgeShape;
-        if (from.bandIndex === to.bandIndex) {
+        if (from.firstBand === from.lastBand && to.firstBand === to.lastBand && from.bandIndex === to.bandIndex) {
             shape = edgeShape(from, to, from.bandRight + BAND_GAP / 2 + offset(`track-${from.bandIndex}`), anchor);
-        } else if (Math.abs(from.bandIndex - to.bandIndex) > 1) {
-            const lane = clearLane(extents, from.bandIndex, to.bandIndex, anchor) + offset(`lane-${from.bandIndex}-${to.bandIndex}`);
-            shape = crossingShape(from, to, anchor, gapCentre(Math.min(from.bandIndex, to.bandIndex)), gapCentre(Math.max(from.bandIndex, to.bandIndex) - 1), lane);
+        } else if (right.firstBand - left.lastBand > 1) {
+            const laneKey = `lane-${left.lastBand}-${right.firstBand}`;
+            // The lines of one hub share their lane, so they run as one trunk and part only near the cards
+            const hubKey = stroke.fromId === null || stroke.toId === null ? `${laneKey}-${stroke.link.id}` : null;
+            const shared = hubKey === null ? undefined : hubLanes.get(hubKey);
+            const lane = stroke.hubLane ?? shared ?? clearLane(extents, left.lastBand, right.firstBand, anchor) + offset(laneKey);
+            if (hubKey !== null) hubLanes.set(hubKey, lane);
+            shape = crossingShape(from, to, anchor, gapCentre(left.lastBand), gapCentre(right.firstBand - 1), lane);
         } else {
             shape = edgeShape(from, to, null, anchor);
         }
-        drawn.push({ link, color: linkColor(context, link), shape });
+        drawn.push({ stroke, shape });
     });
 
     drawn.forEach(entry => edges.appendChild(edgeLine(context, entry)));
 
-    // Every line is on the page before a single label is, so a label can be put where no other line runs.
-    // Its own line does not count: a label sitting on the link it names is what a reader expects.
-    if (labelsShown(context)) {
+    // Hubs are written first since they cannot move. Every line is on the page before a single label is,
+    // so a label can be put where no other line runs. Its own line does not count: a label sitting on the
+    // link it names is what a reader expects.
+    const shown = labelsShown(context);
+    const placed: PlacedLabel[] = [];
+    hubs.forEach(hub => labels.appendChild(hubMark(context, hub, shown, placed)));
+    if (shown) {
         const cards = [...positions.values()];
-        const placed: PlacedLabel[] = [];
-        drawn.forEach(entry => {
+        drawn.filter(entry => entry.stroke.fromId !== null && entry.stroke.toId !== null).forEach(entry => {
             const obstacles = drawn.filter(other => other !== entry).flatMap(other => other.shape.samples);
             labels.appendChild(edgeLabel(context, entry, obstacles, cards, placed));
         });
@@ -591,8 +760,20 @@ function chordCurve(from: RingPlace, to: RingPlace, centerX: number, centerY: nu
     const end = towards(to, centerX, centerY, DOT_RADIUS + 4);
     const midX = (start.x + end.x) / 2;
     const midY = (start.y + end.y) / 2;
-    const control = { x: midX + (centerX - midX) * CHORD_BOW, y: midY + (centerY - midY) * CHORD_BOW };
+    return quadratic(start, { x: midX + (centerX - midX) * CHORD_BOW, y: midY + (centerY - midY) * CHORD_BOW }, end);
+}
 
+/**
+ * A line between a dot on the ring and a hub. It leaves the dot straight towards the centre, as every
+ * chord does, and bends only once on its way to the hub, so an arrow arrives head on rather than askew.
+ */
+function spokeCurve(place: RingPlace, hub: Point, clearance: number, centerX: number, centerY: number, intoDot: boolean): ChordCurve {
+    const end = towards(place, centerX, centerY, clearance);
+    const control = towards(place, centerX, centerY, clearance + Math.hypot(hub.x - end.x, hub.y - end.y) * SPOKE_REACH);
+    return quadratic(intoDot ? hub : end, control, intoDot ? end : hub);
+}
+
+function quadratic(start: Point, control: Point, end: Point): ChordCurve {
     return {
         path: `M${start.x},${start.y} Q${control.x},${control.y} ${end.x},${end.y}`,
         at(t: number): Point {
@@ -605,18 +786,23 @@ function chordCurve(from: RingPlace, to: RingPlace, centerX: number, centerY: nu
     };
 }
 
+
 /**
  * What the chord means, written on the chord. It starts at the middle and steps along the curve until it
  * is clear of the ones already written, so a bundle passing through the centre stays readable.
  */
 function chordLabel(context: RenderContext, link: DiagramLink, curve: ChordCurve, placed: PlacedLabel[]): SVGGElement {
-    const { palette, store } = context;
-    const label = link.label ?? store.linkKindInfo(link.kind).label;
-    const width = label.length * CHORD_LABEL_CHAR + 9;
-
+    const width = linkWording(context, link).length * CHORD_LABEL_CHAR + 9;
     const candidates = CHORD_LABEL_STOPS.map(t => curve.at(t));
     const spot = candidates.find(candidate => !placed.some(item => Math.abs(item.y - candidate.y) < 13 && Math.abs(item.x - candidate.x) < (item.width + width) / 2))
         ?? curve.at(0.5);
+    return chordBadge(context, link, spot, placed);
+}
+
+function chordBadge(context: RenderContext, link: DiagramLink, spot: Point, placed: PlacedLabel[]): SVGGElement {
+    const { palette } = context;
+    const label = linkWording(context, link);
+    const width = label.length * CHORD_LABEL_CHAR + 9;
     placed.push({ x: spot.x, y: spot.y, width });
 
     return group({ class: "tlg-link tlg-link-label", "data-link-id": link.id }, [
@@ -677,6 +863,57 @@ function sideArcs(palette: Palette, ordered: readonly DiagramNode[], places: Rea
     return node;
 }
 
+interface RingChord {
+    link: DiagramLink;
+    color: string;
+    curve: ChordCurve;
+    /** Only a chord reaching a target carries the arrow. */
+    arrow: boolean;
+    /** A chord that is the whole link, which then carries its own label. */
+    single: boolean;
+}
+
+/**
+ * The chords of every link with both ends on the ring. As in the bands, a link joining several records
+ * gathers its lines at a hub, here the middle of the records it joins, which always lies inside the ring.
+ */
+function ringChords(context: RenderContext, places: ReadonlyMap<RecordId, RingPlace>, centerX: number, centerY: number): { chords: RingChord[]; hubs: { link: DiagramLink; at: Point }[] } {
+    const chords: RingChord[] = [];
+    const hubs: { link: DiagramLink; at: Point }[] = [];
+    const joined = joinedAtHub(context);
+    const placed = (ids: readonly RecordId[]): { id: RecordId; place: RingPlace }[] => ids.flatMap(id => {
+        const place = places.get(id);
+        return place ? [{ id, place }] : [];
+    });
+
+    context.store.links.forEach(link => {
+        const sources = placed(link.sourceNodeIds);
+        const targets = placed(link.targetNodeIds);
+        const [firstSource] = sources;
+        const [firstTarget] = targets;
+        if (!firstSource || !firstTarget) return;
+        const color = linkColor(context, firstSource.id);
+
+        if (!joined || (sources.length === 1 && targets.length === 1)) {
+            sources.forEach(source => targets.forEach(target => chords.push({
+                link, color: linkColor(context, source.id), curve: chordCurve(source.place, target.place, centerX, centerY), arrow: true, single: true
+            })));
+            return;
+        }
+
+        const ends = [...sources, ...targets];
+        const at = { x: ends.reduce((sum, end) => sum + end.place.x, 0) / ends.length, y: ends.reduce((sum, end) => sum + end.place.y, 0) / ends.length };
+        hubs.push({ link, at });
+        sources.forEach(source => chords.push({
+            link, color: linkColor(context, source.id), curve: spokeCurve(source.place, at, DOT_RADIUS + 2, centerX, centerY, false), arrow: false, single: false
+        }));
+        targets.forEach(target => chords.push({
+            link, color, curve: spokeCurve(target.place, at, DOT_RADIUS + 4, centerX, centerY, true), arrow: true, single: false
+        }));
+    });
+    return { chords, hubs };
+}
+
 function drawNetwork(context: RenderContext, nodes: readonly DiagramNode[]): SVGGElement {
     const { store, palette } = context;
 
@@ -709,20 +946,16 @@ function drawNetwork(context: RenderContext, nodes: readonly DiagramNode[]): SVG
 
     content.appendChild(sideArcs(palette, ordered, places, centerX, centerY, radius));
 
+    const { chords: drawable, hubs } = ringChords(context, places, centerX, centerY);
     const chords = group();
-    const drawable = store.links
-        .map(link => ({ link, from: places.get(link.sourceNodeId), to: places.get(link.targetNodeId) }))
-        .filter((entry): entry is { link: DiagramLink; from: RingPlace; to: RingPlace } => entry.from !== undefined && entry.to !== undefined)
-        .map(entry => ({ link: entry.link, color: linkColor(context, entry.link), curve: chordCurve(entry.from, entry.to, centerX, centerY) }));
-
     chords.appendChild(arrowMarkers(EDGE_ARROW, drawable.map(entry => entry.color), { refX: 9, size: 4 }));
-    drawable.forEach(({ link, color, curve }) => {
+    drawable.forEach(({ link, color, curve, arrow }) => {
         const info = store.linkKindInfo(link.kind);
         chords.appendChild(group({ class: "tlg-link", "data-link-id": link.id }, [
             hitArea(curve.path),
             path(curve.path, {
                 class: "tlg-link-line", fill: "none", stroke: color, "stroke-width": 1.3, "stroke-dasharray": link.confidence === Confidence.Confirmed ? null : "5 4", opacity: 0.55,
-                "marker-end": info.directed ? `url(#${markerId(EDGE_ARROW, color)})` : null
+                "marker-end": info.directed && arrow ? `url(#${markerId(EDGE_ARROW, color)})` : null
             })
         ]));
     });
@@ -733,9 +966,13 @@ function drawNetwork(context: RenderContext, nodes: readonly DiagramNode[]): SVG
         if (place) content.appendChild(ringNode(context, node, place));
     });
 
-    if (labelsShown(context)) {
-        const placed: PlacedLabel[] = [];
-        drawable.forEach(({ link, curve }) => content.appendChild(chordLabel(context, link, curve, placed)));
+    const shown = labelsShown(context);
+    const placed: PlacedLabel[] = [];
+    hubs.forEach(({ link, at }) => content.appendChild(shown
+        ? chordBadge(context, link, at, placed)
+        : group({ class: "tlg-link", "data-link-id": link.id }, [circle(at.x, at.y, 3.5, { fill: palette.inkMuted })])));
+    if (shown) {
+        drawable.filter(chord => chord.single).forEach(({ link, curve }) => content.appendChild(chordLabel(context, link, curve, placed)));
     }
     return root;
 }
@@ -744,7 +981,7 @@ export const relationshipGraph = defineRenderer<GraphPage>({
     representation: Representation.RelationshipGraph,
     filters: strings => strings.filters.relationshipGraph,
     draggable: true,
-    options: strings => [layoutOption(strings), labelsOption(strings)],
+    options: strings => [layoutOption(strings), labelsOption(strings), groupingOption(strings)],
 
     pages(context) {
         const nodes = context.store.visibleNodes();

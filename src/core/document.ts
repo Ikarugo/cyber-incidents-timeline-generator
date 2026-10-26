@@ -28,7 +28,10 @@ import type {
 } from "./models.js";
 
 export const DOCUMENT_FORMAT = "cyber-incidents-timeline";
-export const DOCUMENT_VERSION = 1;
+export const DOCUMENT_VERSION = 2;
+
+// Documents of this version name one source and one target per link
+const SINGLE_END_VERSION = 1;
 
 /** A record's name inside the document. Stable across instances, meaningless outside the file. */
 export type DocumentKey = string;
@@ -59,10 +62,10 @@ export interface DocumentStep extends Omit<StepFields, "sourceNodeId" | "targetN
     involvements: DocumentInvolvement[];
 }
 
-export interface DocumentLink extends Omit<LinkFields, "sourceNodeId" | "targetNodeId" | "stepId"> {
+export interface DocumentLink extends Omit<LinkFields, "sourceNodeIds" | "targetNodeIds" | "stepId"> {
     key: DocumentKey;
-    source: DocumentKey;
-    target: DocumentKey;
+    sources: DocumentKey[];
+    targets: DocumentKey[];
     step: DocumentKey | null;
 }
 
@@ -129,11 +132,11 @@ function documentStep(step: DiagramStep, keys: ReadonlyMap<RecordId, DocumentKey
 }
 
 function documentLink(link: DiagramLink, index: number, keys: ReadonlyMap<RecordId, DocumentKey>, stepKeys: ReadonlyMap<RecordId, DocumentKey>): DocumentLink | null {
-    const source = keys.get(link.sourceNodeId);
-    const target = keys.get(link.targetNodeId);
-    if (!source || !target) return null;
-    const { id, sourceNodeId, targetNodeId, stepId, ...fields } = link;
-    return { ...fields, key: `link-${index + 1}`, source, target, step: stepId === null ? null : stepKeys.get(stepId) ?? null };
+    const sources = link.sourceNodeIds.flatMap(id => keys.get(id) ?? []);
+    const targets = link.targetNodeIds.flatMap(id => keys.get(id) ?? []);
+    if (sources.length === 0 || targets.length === 0) return null;
+    const { id, sourceNodeIds, targetNodeIds, stepId, ...fields } = link;
+    return { ...fields, key: `link-${index + 1}`, sources, targets, step: stepId === null ? null : stepKeys.get(stepId) ?? null };
 }
 
 /**
@@ -188,7 +191,7 @@ export function readDocument(value: unknown, rules: ValidationRules = DEFAULT_VA
     const incident = readIncidentCreate(reader.raw("incident"), rules);
     const nodes = reader.list("nodes", FieldLimits.DocumentRecords, entry => readDocumentNode(entry, rules)) ?? [];
     const steps = reader.list("steps", FieldLimits.DocumentRecords, entry => readDocumentStep(entry, rules)) ?? [];
-    const links = reader.list("links", FieldLimits.DocumentRecords, entry => readDocumentLink(entry, rules)) ?? [];
+    const links = reader.list("links", FieldLimits.DocumentRecords, entry => readDocumentLink(entry, rules, version ?? DOCUMENT_VERSION)) ?? [];
     const layouts = reader.list("layouts", FieldLimits.LayoutEntries, entry => readDocumentLayout(entry, rules)) ?? [];
     reader.throwIfInvalid();
 
@@ -234,17 +237,26 @@ function readDocumentInvolvement(reader: FieldReader, rules: ValidationRules): D
     return { node, involvement: reader.oneOf("involvement", rules.involvements) ?? rules.defaultInvolvement };
 }
 
-function readDocumentLink(reader: FieldReader, rules: ValidationRules): DocumentLink | undefined {
+/** One end of a link, a list since version 2 and a single key before. */
+function linkEnd(reader: FieldReader, version: number, single: string, list: string): DocumentKey[] {
+    if (version === SINGLE_END_VERSION) {
+        const key = reader.text(single, FieldLimits.DocumentKey);
+        return key === undefined ? [] : [key];
+    }
+    return reader.textList(list, FieldLimits.DocumentKey, FieldLimits.LinkEnds) ?? [];
+}
+
+function readDocumentLink(reader: FieldReader, rules: ValidationRules, version: number): DocumentLink | undefined {
     const key = reader.text("key", FieldLimits.DocumentKey);
-    const source = reader.text("source", FieldLimits.DocumentKey);
-    const target = reader.text("target", FieldLimits.DocumentKey);
-    if (key === undefined || source === undefined || target === undefined) {
-        return reader.fail("", "needs a key, a source and a target");
+    const sources = linkEnd(reader, version, "source", "sources");
+    const targets = linkEnd(reader, version, "target", "targets");
+    if (key === undefined || sources.length === 0 || targets.length === 0) {
+        return reader.fail("", "needs a key, at least one source and at least one target");
     }
     return {
         key,
-        source,
-        target,
+        sources,
+        targets,
         kind: reader.oneOf("kind", rules.linkKinds) ?? rules.defaultLinkKind,
         label: reader.nullableText("label", FieldLimits.LinkLabel) ?? null,
         confidence: reader.oneOf("confidence", rules.confidences) ?? rules.defaultConfidence,
@@ -295,8 +307,8 @@ function checkKeys(nodes: readonly DocumentNode[], steps: readonly DocumentStep[
         step.involvements.forEach(entry => knownNode(entry.node, "steps.involvements"));
     });
     links.forEach(link => {
-        knownNode(link.source, "links.source");
-        knownNode(link.target, "links.target");
+        link.sources.forEach(source => knownNode(source, "links.sources"));
+        link.targets.forEach(target => knownNode(target, "links.targets"));
         if (link.step !== null && !stepKeySet.has(link.step)) {
             issues.push({ field: "links.step", message: `points at ${link.step}, which the document does not carry`, code: "unknown_key" });
         }

@@ -14,7 +14,7 @@ export interface SqlTimelineStoreOptions {
 const INCIDENT_COLUMNS = "id, title, reference_id, impact, scope, external_id, metadata";
 const NODE_COLUMNS = "id, incident_id, name, description, kind, side, parent_id, identifier, role, criticality, compromised, icon, color_override, external_id, canonical_key, metadata";
 const STEP_COLUMNS = "id, incident_id, timestamp, end_timestamp, time_known, order_index, title, description, side, attack_tactic, response_phase, mitre_technique_id, severity, confidence, outcome, audience, evidence_source, is_milestone, milestone_key, icon, source_node_id, target_node_id, external_id, metadata";
-const LINK_COLUMNS = "id, incident_id, source_node_id, target_node_id, kind, label, confidence, step_id, metadata";
+const LINK_COLUMNS = "id, incident_id, kind, label, confidence, step_id, metadata";
 
 function incidentValues(fields: IncidentFields): SqlValue[] {
     return [
@@ -39,7 +39,7 @@ function stepValues(data: StepData): SqlValue[] {
 }
 
 function linkValues(data: LinkData): SqlValue[] {
-    return [data.incidentId, data.sourceNodeId, data.targetNodeId, data.kind, data.label, data.confidence, data.stepId, json(data.metadata)];
+    return [data.incidentId, data.kind, data.label, data.confidence, data.stepId, json(data.metadata)];
 }
 
 function readIncident(row: SqlRow, classifications: string[]): Incident {
@@ -125,13 +125,13 @@ function readStep(row: SqlRow, involvements: StepInvolvement[], tags: string[]):
     };
 }
 
-function readLink(row: SqlRow): LinkRecord {
+function readLink(row: SqlRow, sourceNodeIds: RecordId[], targetNodeIds: RecordId[]): LinkRecord {
     const read = new RowReader(row);
     return {
         id: read.number("id"),
         incidentId: read.number("incident_id"),
-        sourceNodeId: read.number("source_node_id"),
-        targetNodeId: read.number("target_node_id"),
+        sourceNodeIds,
+        targetNodeIds,
         kind: read.text("kind"),
         label: read.nullableText("label"),
         confidence: read.text("confidence"),
@@ -242,6 +242,9 @@ export class SqlTimelineStore implements TimelineStore {
         const stepsOf = `SELECT id FROM ${this.tables.steps} WHERE incident_id = ?`;
         const nodesOf = `SELECT id FROM ${this.tables.nodes} WHERE incident_id = ?`;
         await this.driver.transaction(async () => {
+            for (const table of [this.tables.linkSources, this.tables.linkTargets]) {
+                await this.driver.execute(`DELETE FROM ${table} WHERE link_id IN (SELECT id FROM ${this.tables.links} WHERE incident_id = ?)`, [id]);
+            }
             await this.driver.execute(`DELETE FROM ${this.tables.links} WHERE incident_id = ?`, [id]);
             await this.driver.execute(`DELETE FROM ${this.tables.tags} WHERE step_id IN (${stepsOf})`, [id]);
             await this.driver.execute(`DELETE FROM ${this.tables.involvements} WHERE step_id IN (${stepsOf})`, [id]);
@@ -283,6 +286,8 @@ export class SqlTimelineStore implements TimelineStore {
         await this.driver.transaction(async () => {
             await this.driver.execute(`DELETE FROM ${this.tables.layouts} WHERE node_id = ?`, [id]);
             await this.driver.execute(`DELETE FROM ${this.tables.involvements} WHERE node_id = ?`, [id]);
+            await this.driver.execute(`DELETE FROM ${this.tables.linkSources} WHERE node_id = ?`, [id]);
+            await this.driver.execute(`DELETE FROM ${this.tables.linkTargets} WHERE node_id = ?`, [id]);
             await this.driver.execute(`DELETE FROM ${this.tables.nodes} WHERE id = ?`, [id]);
         });
     }
@@ -360,31 +365,69 @@ export class SqlTimelineStore implements TimelineStore {
 
     async listLinks(incidentId: RecordId): Promise<LinkRecord[]> {
         const rows = await this.driver.query(`SELECT ${LINK_COLUMNS} FROM ${this.tables.links} WHERE incident_id = ? ORDER BY id`, [incidentId]);
-        return rows.map(readLink);
+        return this.linksFrom(rows);
     }
 
     async findLink(id: RecordId): Promise<LinkRecord | null> {
-        const [row] = await this.driver.query(`SELECT ${LINK_COLUMNS} FROM ${this.tables.links} WHERE id = ?`, [id]);
-        return row ? readLink(row) : null;
+        const rows = await this.driver.query(`SELECT ${LINK_COLUMNS} FROM ${this.tables.links} WHERE id = ?`, [id]);
+        const [link] = await this.linksFrom(rows);
+        return link ?? null;
     }
 
     async insertLink(data: LinkData): Promise<LinkRecord> {
-        const id = await this.insertReturningId(
-            `INSERT INTO ${this.tables.links} (incident_id, source_node_id, target_node_id, kind, label, confidence, step_id, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            linkValues(data)
-        );
-        return { ...data, id };
+        return this.driver.transaction(async () => {
+            const id = await this.insertReturningId(
+                `INSERT INTO ${this.tables.links} (incident_id, kind, label, confidence, step_id, metadata) VALUES (?, ?, ?, ?, ?, ?)`,
+                linkValues(data)
+            );
+            await this.writeLinkEnds(this.tables.linkSources, id, data.sourceNodeIds);
+            await this.writeLinkEnds(this.tables.linkTargets, id, data.targetNodeIds);
+            return { ...data, sourceNodeIds: [...data.sourceNodeIds], targetNodeIds: [...data.targetNodeIds], id };
+        });
     }
 
     async updateLink(link: LinkRecord): Promise<void> {
-        await this.driver.execute(
-            `UPDATE ${this.tables.links} SET incident_id = ?, source_node_id = ?, target_node_id = ?, kind = ?, label = ?, confidence = ?, step_id = ?, metadata = ? WHERE id = ?`,
-            [...linkValues(link), link.id]
-        );
+        await this.driver.transaction(async () => {
+            await this.driver.execute(
+                `UPDATE ${this.tables.links} SET incident_id = ?, kind = ?, label = ?, confidence = ?, step_id = ?, metadata = ? WHERE id = ?`,
+                [...linkValues(link), link.id]
+            );
+            await this.writeLinkEnds(this.tables.linkSources, link.id, link.sourceNodeIds);
+            await this.writeLinkEnds(this.tables.linkTargets, link.id, link.targetNodeIds);
+        });
     }
 
     async deleteLink(id: RecordId): Promise<void> {
-        await this.driver.execute(`DELETE FROM ${this.tables.links} WHERE id = ?`, [id]);
+        await this.driver.transaction(async () => {
+            await this.driver.execute(`DELETE FROM ${this.tables.linkSources} WHERE link_id = ?`, [id]);
+            await this.driver.execute(`DELETE FROM ${this.tables.linkTargets} WHERE link_id = ?`, [id]);
+            await this.driver.execute(`DELETE FROM ${this.tables.links} WHERE id = ?`, [id]);
+        });
+    }
+
+    private async linksFrom(rows: readonly SqlRow[]): Promise<LinkRecord[]> {
+        const ids = rows.map(row => new RowReader(row).number("id"));
+        if (ids.length === 0) return [];
+
+        const sources = await this.readLinkEnds(this.tables.linkSources, ids);
+        const targets = await this.readLinkEnds(this.tables.linkTargets, ids);
+        return rows.map(row => {
+            const id = new RowReader(row).number("id");
+            return readLink(row, sources.get(id) ?? [], targets.get(id) ?? []);
+        });
+    }
+
+    private async readLinkEnds(table: string, linkIds: readonly RecordId[]): Promise<Map<RecordId, RecordId[]>> {
+        const placeholders = linkIds.map(() => "?").join(", ");
+        const rows = await this.driver.query(`SELECT link_id, node_id FROM ${table} WHERE link_id IN (${placeholders}) ORDER BY link_id, position`, linkIds);
+        return groupBy(rows, "link_id", reader => reader.number("node_id"));
+    }
+
+    private async writeLinkEnds(table: string, linkId: RecordId, nodeIds: readonly RecordId[]): Promise<void> {
+        await this.driver.execute(`DELETE FROM ${table} WHERE link_id = ?`, [linkId]);
+        for (const [position, nodeId] of nodeIds.entries()) {
+            await this.driver.execute(`INSERT INTO ${table} (link_id, position, node_id) VALUES (?, ?, ?)`, [linkId, position, nodeId]);
+        }
     }
 
     async listLayouts(incidentId: RecordId): Promise<LayoutRecord[]> {

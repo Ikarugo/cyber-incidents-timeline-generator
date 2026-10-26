@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Audience, Involvement, NodeKind, Representation, Side } from "../../src/core/enums.js";
-import type { StepRecord } from "../../src/core/models.js";
+import type { NodeRecord, StepRecord } from "../../src/core/models.js";
 import type { TimelineStore } from "../../src/core/store.js";
 import { readIncidentCreate, readLinkCreate, readNodeCreate, readStepCreate } from "../../src/core/validation.js";
 
@@ -35,7 +35,7 @@ export function runStoreContract(name: string, createStore: () => Promise<Timeli
             const incident = await store.insertIncident(readIncidentCreate({ title: "Incident", metadata: bag }));
             const node = await store.insertNode({ ...readNodeCreate({ name: "Clerk", kind: NodeKind.Person, metadata: bag }), incidentId: incident.id, canonicalKey: null });
             const step = await store.insertStep({ ...readStepCreate({ title: "Step", timestamp: TIMESTAMP, externalId: "ticket-8", metadata: bag }), incidentId: incident.id });
-            const link = await store.insertLink({ ...readLinkCreate({ sourceNodeId: node.id, targetNodeId: node.id, metadata: bag }), incidentId: incident.id });
+            const link = await store.insertLink({ ...readLinkCreate({ sourceNodeIds: [node.id], targetNodeIds: [node.id], metadata: bag }), incidentId: incident.id });
 
             assert.deepEqual((await store.findIncident(incident.id))?.metadata, bag);
             assert.deepEqual((await store.findNode(node.id))?.metadata, bag);
@@ -47,6 +47,22 @@ export function runStoreContract(name: string, createStore: () => Promise<Timeli
             assert.equal((await store.findStep(step.id))?.metadata, null);
         });
 
+        it("keeps the ends of a link in their order", async () => {
+            const store = await createStore();
+            const incident = await store.insertIncident(readIncidentCreate({ title: "Incident" }));
+            const personNode = (name: string): Promise<NodeRecord> => store.insertNode({ ...readNodeCreate({ name, kind: NodeKind.Person }), incidentId: incident.id, canonicalKey: null });
+            const first = await personNode("First");
+            const second = await personNode("Second");
+            const target = await personNode("Target");
+            const other = await personNode("Other");
+            const link = await store.insertLink({ ...readLinkCreate({ sourceNodeIds: [second.id, first.id], targetNodeIds: [other.id, target.id] }), incidentId: incident.id });
+
+            const found = await store.findLink(link.id);
+            assert.deepEqual([found?.sourceNodeIds, found?.targetNodeIds], [[second.id, first.id], [other.id, target.id]]);
+            await store.updateLink({ ...link, sourceNodeIds: [first.id], targetNodeIds: [target.id] });
+            assert.deepEqual((await store.listLinks(incident.id)).map(entry => [entry.sourceNodeIds, entry.targetNodeIds]), [[[first.id], [target.id]]]);
+        });
+
         it("round trips records, steps and links", async () => {
             const store = await createStore();
             const incident = await store.insertIncident(readIncidentCreate({ title: "Incident" }));
@@ -55,7 +71,7 @@ export function runStoreContract(name: string, createStore: () => Promise<Timeli
                 ...readStepCreate({ title: "Step", timestamp: TIMESTAMP, tags: ["one", "two"], involvements: [{ nodeId: node.id, involvement: Involvement.Target }] }),
                 incidentId: incident.id
             });
-            const link = await store.insertLink({ ...readLinkCreate({ sourceNodeId: node.id, targetNodeId: node.id, stepId: step.id }), incidentId: incident.id });
+            const link = await store.insertLink({ ...readLinkCreate({ sourceNodeIds: [node.id], targetNodeIds: [node.id], stepId: step.id }), incidentId: incident.id });
 
             assert.deepEqual(await store.findNode(node.id), node);
             assert.deepEqual(await store.findStep(step.id), step);
@@ -99,7 +115,7 @@ export function runStoreContract(name: string, createStore: () => Promise<Timeli
             const parent = await store.insertNode({ ...readNodeCreate({ name: "Company", kind: NodeKind.Company }), incidentId: incident.id, canonicalKey: null });
             const child = await store.insertNode({ ...readNodeCreate({ name: "Clerk", kind: NodeKind.Person, parentId: parent.id }), incidentId: incident.id, canonicalKey: null });
             const step = await store.insertStep({ ...readStepCreate({ title: "Step", timestamp: TIMESTAMP, sourceNodeId: child.id }), incidentId: incident.id });
-            await store.insertLink({ ...readLinkCreate({ sourceNodeId: parent.id, targetNodeId: child.id, stepId: step.id }), incidentId: incident.id });
+            await store.insertLink({ ...readLinkCreate({ sourceNodeIds: [parent.id], targetNodeIds: [child.id], stepId: step.id }), incidentId: incident.id });
             await store.saveLayout({ nodeId: child.id, representation: Representation.RelationshipGraph, x: 1, y: 1 });
 
             await store.deleteIncident(incident.id);

@@ -155,13 +155,17 @@ export type StepCreateInput = Pick<StepFields, "title" | "timestamp"> & Partial<
 export type StepUpdateInput = Partial<StepFields>;
 
 /**
- * A standing relationship between two records, independent of the chronology carried by the steps.
+ * A standing relationship from one or more records to one or more others, independent of the chronology
+ * carried by the steps. Every source relates the same way to every target, such as several users who
+ * clicked the same phishing links.
  */
 export interface LinkRecord {
     id: RecordId;
     incidentId: RecordId;
-    sourceNodeId: RecordId;
-    targetNodeId: RecordId;
+    /** Never empty, never holds the same record twice, never shares a record with the targets. */
+    sourceNodeIds: RecordId[];
+    /** Never empty, never holds the same record twice. */
+    targetNodeIds: RecordId[];
     kind: LinkKindKey;
     /** Overrides the default wording of the kind on the edge. */
     label: string | null;
@@ -173,7 +177,7 @@ export interface LinkRecord {
 }
 
 export type LinkFields = Omit<LinkRecord, "id" | "incidentId">;
-export type LinkCreateInput = Pick<LinkFields, "sourceNodeId" | "targetNodeId"> & Partial<LinkFields>;
+export type LinkCreateInput = Pick<LinkFields, "sourceNodeIds" | "targetNodeIds"> & Partial<LinkFields>;
 export type LinkUpdateInput = Partial<LinkFields>;
 
 /**

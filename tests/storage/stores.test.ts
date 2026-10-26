@@ -20,6 +20,7 @@ const STORAGE_KEY = "test-timeline";
 const CONCURRENT_WRITES = 20;
 const SAMPLE_TIMESTAMP = "2026-01-12T08:00";
 const SINGLE_AUDIENCE_VERSION = 1;
+const SINGLE_END_VERSION = 2;
 
 function isStoredSnapshot(value: unknown): value is StoreSnapshot {
     return typeof value === "object" && value !== null && "steps" in value && Array.isArray(value.steps);
@@ -82,6 +83,27 @@ describe("BrowserStorageTimelineStore", () => {
         const reloaded = new TimelineService(new BrowserStorageTimelineStore(storage, STORAGE_KEY));
         const steps = (await reloaded.getDiagram(incident.id)).steps;
         assert.deepEqual(steps.map(step => step.audiences), [[], [Audience.Executive]]);
+    });
+
+    it("upgrades a snapshot holding one source and one target per link", async () => {
+        const storage = new MapStorage();
+        const service = new TimelineService(new BrowserStorageTimelineStore(storage, STORAGE_KEY));
+        const incident = await service.createIncident({ title: "Earlier" });
+        const clerk = await service.createNode(incident.id, { name: "Clerk", kind: NodeKind.Person });
+        const host = await service.createNode(incident.id, { name: "Host", kind: NodeKind.Workstation });
+        await service.createLink(incident.id, { sourceNodeIds: [clerk.id], targetNodeIds: [host.id] });
+
+        const stored: unknown = JSON.parse(storage.getItem(STORAGE_KEY) ?? "null");
+        assert.ok(isStoredSnapshot(stored));
+        const earlier = {
+            ...stored,
+            version: SINGLE_END_VERSION,
+            links: stored.links.map(({ sourceNodeIds, targetNodeIds, ...rest }) => ({ ...rest, sourceNodeId: sourceNodeIds[0], targetNodeId: targetNodeIds[0] }))
+        };
+        storage.setItem(STORAGE_KEY, JSON.stringify(earlier));
+
+        const reloaded = new TimelineService(new BrowserStorageTimelineStore(storage, STORAGE_KEY));
+        assert.deepEqual((await reloaded.getDiagram(incident.id)).links.map(link => [link.sourceNodeIds, link.targetNodeIds]), [[[clerk.id], [host.id]]]);
     });
 
     it("refuses data that is not a snapshot", () => {

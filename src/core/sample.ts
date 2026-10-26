@@ -102,12 +102,12 @@ export async function seedSampleData(api: TimelineApi, start: Date = defaultSamp
     await step({ timestamp: at(start, 48), title: "Services restored from clean backups", side: Side.Defender, responsePhase: ResponsePhase.Recover, outcome: StepOutcome.Succeeded, isMilestone: true, sourceNodeId: soc, targetNodeId: fileServer });
     await step({ timestamp: at(start, 72), timeKnown: false, title: "Lessons learned review", side: Side.Defender, responsePhase: ResponsePhase.Review, audiences: [Audience.Executive], sourceNodeId: soc });
 
-    await api.createLink(incident.id, { sourceNodeId: clerk, targetNodeId: workstation, kind: LinkKind.Owns });
-    await api.createLink(incident.id, { sourceNodeId: clerk, targetNodeId: credentials, kind: LinkKind.Owns });
-    await api.createLink(incident.id, { sourceNodeId: workstation, targetNodeId: c2, kind: LinkKind.CommandAndControl, stepId: beacon });
-    await api.createLink(incident.id, { sourceNodeId: workstation, targetNodeId: fileServer, kind: LinkKind.LateralMovement, confidence: Confidence.Likely });
-    await api.createLink(incident.id, { sourceNodeId: fileServer, targetNodeId: c2, kind: LinkKind.Exfiltration });
-    await api.createLink(incident.id, { sourceNodeId: retainer, targetNodeId: soc, kind: LinkKind.Communication });
+    await api.createLink(incident.id, { sourceNodeIds: [clerk], targetNodeIds: [workstation], kind: LinkKind.Owns });
+    await api.createLink(incident.id, { sourceNodeIds: [clerk], targetNodeIds: [credentials], kind: LinkKind.Owns });
+    await api.createLink(incident.id, { sourceNodeIds: [workstation], targetNodeIds: [c2], kind: LinkKind.CommandAndControl, stepId: beacon });
+    await api.createLink(incident.id, { sourceNodeIds: [workstation], targetNodeIds: [fileServer], kind: LinkKind.LateralMovement, confidence: Confidence.Likely });
+    await api.createLink(incident.id, { sourceNodeIds: [fileServer], targetNodeIds: [c2], kind: LinkKind.Exfiltration });
+    await api.createLink(incident.id, { sourceNodeIds: [retainer], targetNodeIds: [soc], kind: LinkKind.Communication });
 
     return incident;
 }

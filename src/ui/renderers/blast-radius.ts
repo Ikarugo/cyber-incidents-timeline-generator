@@ -58,7 +58,7 @@ function computeHops(store: DiagramStore, nodes: readonly DiagramNode[]): { orig
         fromB.add(a);
     };
 
-    store.links.forEach(link => connect(link.sourceNodeId, link.targetNodeId));
+    store.linkEdges().forEach(edge => connect(edge.sourceNodeId, edge.targetNodeId));
     store.steps.forEach(step => connect(step.sourceNodeId, step.targetNodeId));
     nodes.forEach(node => connect(node.id, node.parentId));
 
@@ -107,7 +107,7 @@ function connections(store: DiagramStore, palette: Palette, placed: ReadonlyMap<
         }));
     };
 
-    store.links.forEach(link => edge(link.sourceNodeId, link.targetNodeId));
+    store.linkEdges().forEach(entry => edge(entry.sourceNodeId, entry.targetNodeId));
     store.steps.forEach(step => edge(step.sourceNodeId, step.targetNodeId));
     return node;
 }

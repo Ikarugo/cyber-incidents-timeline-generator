@@ -371,12 +371,12 @@ export class TimelineService implements TimelineApi {
             }
 
             for (const link of parsed.links) {
-                const sourceNodeId = nodeIds.get(link.source);
-                const targetNodeId = nodeIds.get(link.target);
-                if (sourceNodeId === undefined || targetNodeId === undefined) continue;
+                const sourceNodeIds = link.sources.flatMap(source => nodeIds.get(source) ?? []);
+                const targetNodeIds = link.targets.flatMap(target => nodeIds.get(target) ?? []);
+                if (sourceNodeIds.length === 0 || targetNodeIds.length === 0) continue;
                 await this.createLink(incidentId, {
-                    sourceNodeId,
-                    targetNodeId,
+                    sourceNodeIds,
+                    targetNodeIds,
                     kind: link.kind,
                     label: link.label,
                     confidence: link.confidence,
@@ -467,9 +467,14 @@ export class TimelineService implements TimelineApi {
                     await this.store.updateStep(cleaned);
                 }
             }
+            // A link loses only the removed records, and goes once either of its ends has none left
             for (const link of await this.store.listLinks(incidentId)) {
-                if (removed.has(link.sourceNodeId) || removed.has(link.targetNodeId)) {
+                const sourceNodeIds = link.sourceNodeIds.filter(id => !removed.has(id));
+                const targetNodeIds = link.targetNodeIds.filter(id => !removed.has(id));
+                if (sourceNodeIds.length === 0 || targetNodeIds.length === 0) {
                     await this.store.deleteLink(link.id);
+                } else if (sourceNodeIds.length !== link.sourceNodeIds.length || targetNodeIds.length !== link.targetNodeIds.length) {
+                    await this.store.updateLink({ ...link, sourceNodeIds, targetNodeIds });
                 }
             }
             // Deepest first, so no record ever points at a parent that is already gone
@@ -647,8 +652,11 @@ export class TimelineService implements TimelineApi {
 
     private async checkLinkReferences(incidentId: RecordId, link: LinkFields): Promise<void> {
         const owned = new Set((await this.store.listNodes(incidentId)).map(node => node.id));
-        if (!owned.has(link.sourceNodeId) || !owned.has(link.targetNodeId)) {
-            throw invalid("sourceNodeId", "both ends of a relationship must be records of the same incident");
+        if (![...link.sourceNodeIds, ...link.targetNodeIds].every(id => owned.has(id))) {
+            throw invalid("sourceNodeIds", "both ends of a relationship must be records of the same incident");
+        }
+        if (link.sourceNodeIds.some(id => link.targetNodeIds.includes(id))) {
+            throw invalid("targetNodeIds", "a record cannot be both a source and a target of a relationship");
         }
         if (link.stepId !== null) {
             const step = await this.store.findStep(link.stepId);

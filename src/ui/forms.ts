@@ -126,6 +126,18 @@ export function recordSelect(
     }, options);
 }
 
+export function recordMultiSelect(
+    values: readonly RecordId[],
+    nodes: readonly DiagramNode[],
+    onChange: (values: RecordId[]) => void,
+    options: SelectOptions = {}
+): HTMLElement {
+    const choices: Choice<string>[] = nodes.map(node => ({ value: String(node.id), label: node.name }));
+    return multiSelect(values.map(String), choices, chosen => {
+        onChange(nodes.filter(node => chosen.includes(String(node.id))).map(node => node.id));
+    }, options);
+}
+
 export function checkbox(label: string, value: boolean, onChange: (value: boolean) => void): HTMLDivElement {
     const input = h("input", null, { type: "checkbox", id: uniqueId("check") });
     input.checked = value;
