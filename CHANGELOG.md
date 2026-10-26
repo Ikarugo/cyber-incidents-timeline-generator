@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-10-26
+
+### Added
+
+- A relationship can join several records to several others, such as every user who clicked the same phishing links.
+- The relationship graph draws a relationship between several records through one shared label, or as one arrow per pair with the Shared links setting.
+- Relationships have an Other kind with free wording.
+- The relationship graph switches between bands and network from the toolbar.
+
+### Changed
+
+- The From and To pickers of a relationship stay open while records are picked.
+- Breaking: links hold `sourceNodeIds` and `targetNodeIds` lists in the API and the stores. Old exports and browser data still load. SQL databases need to be recreated, as links now use the `link_sources` and `link_targets` tables.
+
+### Fixed
+
+- A picker with every entry picked lists them all instead of reading as if none were picked.
+
 ## [0.6.0] - 2026-10-10
 
 ### Added
