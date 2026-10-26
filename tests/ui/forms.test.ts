@@ -96,10 +96,11 @@ describe("a picker holding several choices", () => {
         return option;
     }
 
-    it("names the empty label when nothing or everything is picked", () => {
+    it("names the empty label when nothing is picked, and the all label only when one is given", () => {
         assert.equal(toggleOf(multiSelect([], choicesOf(SHORT), () => undefined, { emptyLabel: EVERYONE })).textContent, EVERYONE);
         const all = choicesOf(SHORT).map(choice => choice.value);
-        assert.equal(toggleOf(multiSelect(all, choicesOf(SHORT), () => undefined, { emptyLabel: EVERYONE })).textContent, EVERYONE);
+        assert.equal(toggleOf(multiSelect(all, choicesOf(SHORT), () => undefined, { emptyLabel: EVERYONE, allLabel: EVERYONE })).textContent, EVERYONE);
+        assert.equal(toggleOf(multiSelect(all, choicesOf(SHORT), () => undefined, { emptyLabel: EVERYONE })).textContent, choicesOf(SHORT).map(choice => choice.label).join(", "));
     });
 
     it("turns choices on and off and keeps the list open", () => {

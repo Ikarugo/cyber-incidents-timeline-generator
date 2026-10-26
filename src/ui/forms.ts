@@ -91,6 +91,8 @@ export function textArea(value: string | null, onChange: (value: string | null) 
 export interface SelectOptions {
     allowEmpty?: boolean;
     emptyLabel?: string;
+    /** Shown instead of every name when a multiple choice holds all of them. */
+    allLabel?: string;
     strings?: FormStrings;
     /** Draws the icons the choices name. */
     icons?: IconSet;
@@ -196,9 +198,9 @@ export function multiSelect<TValue extends string>(
     values: readonly TValue[],
     choices: readonly Choice<TValue>[],
     onChange: (values: TValue[]) => void,
-    { emptyLabel = DEFAULT_STRINGS.forms.none, strings = DEFAULT_STRINGS.forms, icons }: SelectOptions = {}
+    { emptyLabel = DEFAULT_STRINGS.forms.none, allLabel, strings = DEFAULT_STRINGS.forms, icons }: SelectOptions = {}
 ): HTMLElement {
-    return multiCombobox(values, choices, onChange, strings, { emptyLabel, searchable: choices.length >= SEARCHABLE_FROM, icons: icons ?? null });
+    return multiCombobox(values, choices, onChange, strings, { emptyLabel, allLabel: allLabel ?? null, searchable: choices.length >= SEARCHABLE_FROM, icons: icons ?? null });
 }
 
 export function button(icons: IconSet, label: string, className: string, onClick: () => void, icon: string | null = null): HTMLButtonElement {

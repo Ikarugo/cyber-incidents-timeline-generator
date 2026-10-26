@@ -14,6 +14,8 @@ export interface ComboboxStrings {
 export interface ComboboxOptions {
     allowEmpty?: boolean;
     emptyLabel?: string;
+    /** Shown instead of every name when a multiple choice holds all of them. */
+    allLabel?: string | null;
     /** A handful of choices reads faster without a search box above it. */
     searchable?: boolean;
     /** Draws the icons the choices name. */
@@ -293,7 +295,7 @@ export function multiCombobox<TValue extends string>(
     choices: readonly Choice<TValue>[],
     onChange: (values: TValue[]) => void,
     strings: ComboboxStrings,
-    { emptyLabel = "", searchable = true, icons = null }: ComboboxOptions = {}
+    { emptyLabel = "", allLabel = null, searchable = true, icons = null }: ComboboxOptions = {}
 ): HTMLDivElement {
     const chosen = new Set<TValue>(values);
     return dropdown(choices, {
@@ -306,8 +308,9 @@ export function multiCombobox<TValue extends string>(
         },
         caption: () => {
             const picked = choices.filter(choice => chosen.has(choice.value));
-            const everything = picked.length === 0 || picked.length === choices.length;
-            return [everything ? emptyLabel : picked.map(choice => choice.label).join(LABEL_JOIN)];
+            if (picked.length === 0) return [emptyLabel];
+            if (allLabel !== null && picked.length === choices.length) return [allLabel];
+            return [picked.map(choice => choice.label).join(LABEL_JOIN)];
         }
     }, strings, searchable, icons);
 }

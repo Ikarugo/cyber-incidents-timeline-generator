@@ -243,7 +243,7 @@ export class Inspector {
             ),
             row(
                 field(w.confidence, this.pick(step.confidence, catalog.confidences, value => { if (value) save({ confidence: value }); })),
-                field(w.audience, multiSelect(step.audiences, catalog.audiences, value => save({ audiences: value }), { emptyLabel: w.everyone }))
+                field(w.audience, multiSelect(step.audiences, catalog.audiences, value => save({ audiences: value }), { emptyLabel: w.everyone, allLabel: w.everyone }))
             ),
             field(w.evidenceSource, textInput(step.evidenceSource, value => save({ evidenceSource: value }), w.evidenceSourceHint)),
             checkbox(w.milestone, step.isMilestone, value => save({ isMilestone: value })),
