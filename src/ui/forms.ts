@@ -145,6 +145,9 @@ export function checkbox(label: string, value: boolean, onChange: (value: boolea
     return h("div", "tlg-check", {}, [input, h("label", null, { for: input.id }, [label])]);
 }
 
+// Logs stamp events to the second and several often share a minute, so the time field offers seconds
+const TIME_STEP_SECONDS = "1";
+
 /**
  * A date and, beside it, a time that may be left blank. Incidents are often reconstructed from records
  * that only carry the day, and saying nothing is more honest than inventing midnight.
@@ -152,7 +155,7 @@ export function checkbox(label: string, value: boolean, onChange: (value: boolea
 export function dateAndTime(parts: WallClockParts, onChange: (parts: WallClockParts) => void, strings: FormStrings = DEFAULT_STRINGS.forms): HTMLDivElement {
     const dateInput = h("input", "tlg-input", { type: "date", id: uniqueId("date"), "data-primary": "" });
     dateInput.value = parts.date ?? "";
-    const timeInput = h("input", "tlg-input", { type: "time", id: uniqueId("time"), "aria-label": strings.timeHint });
+    const timeInput = h("input", "tlg-input", { type: "time", step: TIME_STEP_SECONDS, id: uniqueId("time"), "aria-label": strings.timeHint });
     timeInput.value = parts.time ?? "";
 
     const report = (): void => onChange({ date: dateInput.value || null, time: timeInput.value || null });

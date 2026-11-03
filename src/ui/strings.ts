@@ -441,6 +441,7 @@ export interface SettingsStrings {
     datesHeading: string;
     datesHint: string;
     dateFormat: string;
+    seconds: string;
     minutes: string;
     hours: string;
     days: string;
@@ -1026,6 +1027,7 @@ export const DEFAULT_STRINGS: Strings = {
         datesHeading: "Dates and durations",
         datesHint: "How dates are written, and the short units durations end with.",
         dateFormat: "Date format",
+        seconds: "Seconds",
         minutes: "Minutes",
         hours: "Hours",
         days: "Days",

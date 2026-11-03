@@ -76,6 +76,19 @@ describe("locale", () => {
         const formats = new TimeFormats("fr-FR", { minutes: "min", hours: "h", days: "j" });
         assert.equal(formats.formatDuration(10), "10h");
         assert.equal(formats.formatDuration(240), "10j");
+        assert.equal(new TimeFormats("fr-FR", { seconds: "sec", minutes: "min", hours: "h", days: "j" }).formatDuration(42 / 3600), "42sec");
+    });
+
+    it("keeps working with units written before seconds could be recorded", () => {
+        const formats = new TimeFormats("fr-FR", { minutes: "min", hours: "h", days: "j" });
+        assert.equal(formats.formatDuration(42 / 3600), "42s");
+        assert.equal(formats.formatDuration(0.5), "30min");
+    });
+
+    it("writes seconds in the locale it was given, and only when they were recorded", () => {
+        const formats = new TimeFormats("fr-FR");
+        assert.equal(formats.formatTime(new Date(2026, 0, 12, 13, 57, 42)), "13:57:42");
+        assert.equal(formats.formatTime(new Date(2026, 0, 12, 13, 57)), "13:57");
     });
 
     it("keeps two sets of formats apart, so two workspaces can differ", () => {

@@ -3,7 +3,9 @@ import type { WallClock } from "./models.js";
 const ZONE_SUFFIX = /(Z|[+-]\d{2}:?\d{2})$/i;
 const WALL_CLOCK = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?)?$/;
 const MILLISECONDS_PER_HOUR = 3600000;
-const MILLISECONDS_PER_MINUTE = 60000;
+const MILLISECONDS_PER_SECOND = 1000;
+const TIME_OF_DAY = /^(\d{2}):(\d{2})(?::(\d{2}))?$/;
+const ZERO_SECONDS = "00";
 
 function pad(value: number): string {
     return String(value).padStart(2, "0");
@@ -42,13 +44,13 @@ export function formatWallClock(date: Date): WallClock {
 }
 
 /**
- * The moment halfway between two others. It falls on a whole minute because forms edit minutes, and
+ * The moment halfway between two others. It falls on a whole second because forms edit seconds, and
  * never before the first moment so it keeps its place after it.
  */
 export function momentBetween(from: Date, to: Date): Date {
     const halfway = (from.getTime() + to.getTime()) / 2;
-    const minute = Math.floor(halfway / MILLISECONDS_PER_MINUTE) * MILLISECONDS_PER_MINUTE;
-    return new Date(Math.max(from.getTime(), minute));
+    const second = Math.floor(halfway / MILLISECONDS_PER_SECOND) * MILLISECONDS_PER_SECOND;
+    return new Date(Math.max(from.getTime(), second));
 }
 
 export interface WallClockParts {
@@ -64,12 +66,20 @@ export function splitWallClock(date: Date | null, timeKnown: boolean): WallClock
     if (!date) return { date: null, time: null };
     return {
         date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
-        time: timeKnown ? `${pad(date.getHours())}:${pad(date.getMinutes())}` : null
+        time: timeKnown ? `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` : null
     };
 }
 
+/**
+ * A time input leaves the seconds out of its value when it pleases, so both spellings arrive here. Anything
+ * else is passed through untouched for validation to refuse rather than quietly becoming midnight.
+ */
 export function joinWallClock(date: string, time: string | null): WallClock {
-    return `${date}T${time || "00:00"}:00`;
+    if (!time) return `${date}T00:00:${ZERO_SECONDS}`;
+    const match = TIME_OF_DAY.exec(time);
+    if (!match) return `${date}T${time}`;
+    const [, hours, minutes, seconds = ZERO_SECONDS] = match;
+    return `${date}T${hours}:${minutes}:${seconds}`;
 }
 
 export function hoursBetween(from: Date | null, to: Date | null): number | null {
@@ -89,6 +99,8 @@ export function millisecondsFromHours(hours: number): number {
 export const DEFAULT_LOCALE = "en-GB";
 
 const MINUTES_PER_HOUR = 60;
+const SECONDS_PER_MINUTE = 60;
+const SECONDS_PER_HOUR = 3600;
 const HOURS_SHOWN_AS_HOURS = 48;
 const HOURS_PER_DAY = 24;
 
@@ -100,15 +112,18 @@ export class TimeFormats {
     readonly locale: string;
     private readonly date: Intl.DateTimeFormat;
     private readonly time: Intl.DateTimeFormat;
+    private readonly timeWithSeconds: Intl.DateTimeFormat;
     private readonly dateShort: Intl.DateTimeFormat;
-    private readonly units: DurationUnits;
+    private readonly units: Required<DurationUnits>;
 
     constructor(locale: string = DEFAULT_LOCALE, units: DurationUnits = DEFAULT_DURATION_UNITS) {
         this.locale = locale;
         this.date = new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric" });
         this.time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
+        this.timeWithSeconds = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
         this.dateShort = new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short" });
-        this.units = units;
+        // Units written before seconds could be recorded carry no suffix for them, and keep working
+        this.units = { ...DEFAULT_DURATION_UNITS, ...units };
     }
 
     formatDate(date: Date | null): string {
@@ -119,17 +134,26 @@ export class TimeFormats {
         return date ? this.dateShort.format(date) : "";
     }
 
-    formatTime(date: Date | null): string {
-        return date ? this.time.format(date) : "";
+    /**
+     * Seconds are shown only when they were recorded, so a timeline kept to the minute reads exactly as it did.
+     * A caller drawing moments it computed itself, such as axis ticks, decides for them instead.
+     */
+    formatTime(date: Date | null, withSeconds = date !== null && date.getSeconds() !== 0): string {
+        if (!date) return "";
+        return (withSeconds ? this.timeWithSeconds : this.time).format(date);
     }
 
     formatDateTime(date: Date | null): string {
-        return date ? `${this.date.format(date)} ${this.time.format(date)}` : "";
+        return date ? `${this.date.format(date)} ${this.formatTime(date)}` : "";
     }
 
     formatDuration(hours: number | null): string | null {
         if (hours === null) return null;
-        if (hours < 1) return `${Math.round(hours * MINUTES_PER_HOUR)}${this.units.minutes}`;
+        const seconds = Math.round(hours * SECONDS_PER_HOUR);
+        if (seconds < SECONDS_PER_MINUTE) return `${seconds}${this.units.seconds}`;
+        // Rounding decides the unit, so a span just short of the next unit reads as that unit, not 60min
+        const minutes = Math.round(hours * MINUTES_PER_HOUR);
+        if (minutes < MINUTES_PER_HOUR) return `${minutes}${this.units.minutes}`;
         if (hours < HOURS_SHOWN_AS_HOURS) return `${Math.round(hours * 10) / 10}${this.units.hours}`;
         return `${Math.round(hours / HOURS_PER_DAY)}${this.units.days}`;
     }
@@ -142,12 +166,14 @@ export class TimeFormats {
 
 /** The suffixes a duration is written with, which no Intl format covers. */
 export interface DurationUnits {
+    /** Only spans under a minute use it. Defaults to s, so units written before carry on working. */
+    seconds?: string;
     minutes: string;
     hours: string;
     days: string;
 }
 
-export const DEFAULT_DURATION_UNITS: DurationUnits = { minutes: "min", hours: "h", days: "d" };
+export const DEFAULT_DURATION_UNITS: Required<DurationUnits> = { seconds: "s", minutes: "min", hours: "h", days: "d" };
 
 const DEFAULT_FORMATS = new TimeFormats();
 
@@ -159,8 +185,8 @@ export function formatDateShort(date: Date | null): string {
     return DEFAULT_FORMATS.formatDateShort(date);
 }
 
-export function formatTime(date: Date | null): string {
-    return DEFAULT_FORMATS.formatTime(date);
+export function formatTime(date: Date | null, withSeconds?: boolean): string {
+    return DEFAULT_FORMATS.formatTime(date, withSeconds);
 }
 
 export function formatDateTime(date: Date | null): string {
