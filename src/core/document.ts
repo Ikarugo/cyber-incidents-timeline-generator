@@ -143,8 +143,7 @@ function documentLink(link: DiagramLink, index: number, keys: ReadonlyMap<Record
  * The whole timeline as a document. Pure, so a server can write one with nothing but the records.
  */
 export function exportDocument(diagram: Diagram, now: Date = new Date()): TimelineDocument {
-    const keys = unique(nodeKeys(diagram.nodes));
-    const stepKeys = unique(new Map(diagram.steps.map((step, index) => [step.id, `step-${index + 1}`])));
+    const { nodes: keys, steps: stepKeys } = documentKeys(diagram);
 
     return {
         format: DOCUMENT_FORMAT,
@@ -334,8 +333,21 @@ export interface ImportOptions {
     shiftHours?: number;
 }
 
+/**
+ * The keys a document gives the records of a diagram, for anything written beside it, such as the evidence
+ * files of a bundle, that has to name them the same way.
+ */
+export function documentKeys(diagram: Pick<Diagram, "nodes" | "steps">): { nodes: Map<RecordId, DocumentKey>; steps: Map<RecordId, DocumentKey> } {
+    return {
+        nodes: unique(nodeKeys(diagram.nodes)),
+        steps: unique(new Map(diagram.steps.map((step, index) => [step.id, `step-${index + 1}`])))
+    };
+}
+
 export interface ImportReport {
     incidentId: RecordId;
+    /** The record each key of the document became, created or matched, for tying things back to them. */
+    keys: { nodes: Record<DocumentKey, RecordId>; steps: Record<DocumentKey, RecordId> };
     created: { nodes: number; steps: number; links: number };
     matched: { nodes: number; steps: number };
     /** Milestone keys the document carried that a step in the incident already held. */

@@ -10,6 +10,7 @@ import type { DiagramNode } from "../core/models.js";
 import { TimeFormats, hoursBetween } from "../core/time.js";
 
 const DEFAULT_TIME = new TimeFormats();
+const EVIDENCE_MARK_WIDTH = 30;
 import type { TimelineStep } from "./diagram-store.js";
 import type { RenderContext } from "./renderers/registry.js";
 import { circle, el, group, line, measure, path, rect, roundedPath, stripTags, text, topRoundedPath, truncate, wrap } from "./svg.js";
@@ -226,8 +227,19 @@ export function stepCard(context: RenderContext, step: TimelineStep, x: number, 
     }
 
     const baseline = y + height - 14;
+    const evidence = context.store.attachmentsOf(step.id).length;
+    // A paperclip and a count say the step is proven by files, which open from the details panel
+    const labelsWidth = evidence > 0 ? inner - EVIDENCE_MARK_WIDTH : inner;
     node.appendChild(participants(context, step, left, baseline, inner, width < NARROW_CARD));
-    node.appendChild(microLabels(palette, labelsFor(context, step), left, baseline, inner));
+    node.appendChild(microLabels(palette, labelsFor(context, step), left, baseline, labelsWidth));
+    if (evidence > 0) {
+        const mark = group();
+        mark.setAttribute("data-evidence", String(evidence));
+        const right = left + inner;
+        mark.appendChild(context.icons.draw(Icon.Paperclip, right - EVIDENCE_MARK_WIDTH + 12, baseline, 11, palette.inkMuted));
+        mark.appendChild(text(String(evidence), right - EVIDENCE_MARK_WIDTH + 20, baseline, { "font-size": 9, "font-weight": 700, fill: palette.inkMuted, "dominant-baseline": "central" }));
+        node.appendChild(mark);
+    }
 
     // The outline goes on last, so the tinted strip and the accent cannot eat the border they sit against
     node.appendChild(cardOutline(palette, x, y, width, height, null));

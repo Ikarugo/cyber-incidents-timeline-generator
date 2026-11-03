@@ -1,3 +1,4 @@
+import type { Attachment } from "./attachments.js";
 import type {
     AttackTacticKey,
     AudienceKey,
@@ -260,4 +261,6 @@ export interface Diagram {
     metrics: ResponseMetrics;
     benchmark: ResponseBenchmark;
     catalog: Catalog;
+    /** The evidence files of the incident, present only when the server keeps them. */
+    attachments?: Attachment[];
 }

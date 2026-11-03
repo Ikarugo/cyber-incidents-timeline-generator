@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { CENSOR_GLYPH, Masker, censorBar, defaultPrivacyRules, foldTerm, maskDiagram, type PrivacyRules } from "../../src/core/anonymize.js";
+import { AttachmentKind } from "../../src/core/attachments.js";
 import { Disclosure, FuzzyLevel, NodeKind, SensitiveCategory, Side } from "../../src/core/enums.js";
 import type { Diagram } from "../../src/core/models.js";
 import { INCIDENT_TITLE, createService, person } from "../support/fixtures.js";
@@ -20,6 +21,7 @@ const MIDDLE_BAR = 8;
 const LONG_BAR = 12;
 // Halfway between the short and the middle bar
 const TIED_LENGTH = 6;
+const SAMPLE_MD5 = "44d88612fea8a8f36de82e1278abb02f";
 
 async function diagramWith(names: { person?: string; company?: string; description?: string }): Promise<Diagram> {
     const { service } = createService();
@@ -46,6 +48,22 @@ describe("Masker", () => {
         assert.equal(copy.nodes[0]?.name, PERSON_ALIAS);
         assert.equal(copy.steps[0]?.description, `${PERSON_ALIAS} reset the password`);
         assert.equal(masker.mask("Martin called the desk", Disclosure.Anonymized), `${PERSON_ALIAS} called the desk`);
+    });
+
+    it("masks the name and the hashes of an evidence file like any other field", async () => {
+        const diagram = await diagramWith({ person: PERSON });
+        const file = {
+            id: 1, incidentId: diagram.incident.id, fileName: `dropper sent to ${PERSON}.exe`, size: 10,
+            kind: AttachmentKind.Sample, mediaType: null, md5: SAMPLE_MD5, sha1: "b".repeat(40), sha256: "c".repeat(64),
+            uploadedAt: STEP_AT, stepIds: [], nodeIds: []
+        };
+        const copy = maskDiagram({ ...diagram, attachments: [file] }, new Masker(diagram, rules()), Disclosure.Anonymized);
+        const hidden = copy.attachments?.[0];
+        assert.ok(hidden);
+        assert.ok(!hidden.fileName.includes(PERSON), hidden.fileName);
+        assert.ok(hidden.fileName.includes(PERSON_ALIAS), hidden.fileName);
+        assert.equal(hidden.md5, "Hash-1");
+        assert.notEqual(hidden.sha256, "c".repeat(64));
     });
 
     it("numbers aliases in the order of the diagram, whatever is masked first", async () => {

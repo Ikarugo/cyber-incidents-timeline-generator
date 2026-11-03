@@ -319,7 +319,7 @@ export class TimelineService implements TimelineApi {
             const existingSteps = await this.store.listSteps(incidentId);
             const takenMilestones = new Set(existingSteps.map(step => step.milestoneKey).filter((key): key is string => key !== null));
 
-            const report: ImportReport = { incidentId, created: { nodes: 0, steps: 0, links: 0 }, matched: { nodes: 0, steps: 0 }, milestonesTaken: [] };
+            const report: ImportReport = { incidentId, keys: { nodes: {}, steps: {} }, created: { nodes: 0, steps: 0, links: 0 }, matched: { nodes: 0, steps: 0 }, milestonesTaken: [] };
             const nodeIds = new Map<string, RecordId>();
 
             // Parents are set in a second pass, because a document may name a parent before it carries it
@@ -393,6 +393,7 @@ export class TimelineService implements TimelineApi {
             if (layouts.length > 0) {
                 await this.saveLayout(incidentId, layouts);
             }
+            report.keys = { nodes: Object.fromEntries(nodeIds), steps: Object.fromEntries(stepIds) };
             return report;
         });
     }

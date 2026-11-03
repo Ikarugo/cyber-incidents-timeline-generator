@@ -1,3 +1,4 @@
+import type { AttachmentUsage } from "../core/attachments.js";
 import type { NodeKindInfo } from "../core/catalog.js";
 import { RecordType } from "../core/enums.js";
 import type { LinkCreateInput, LinkUpdateInput, NodeCreateInput, NodeUpdateInput, RecordId, StepCreateInput, StepUpdateInput } from "../core/models.js";
@@ -84,6 +85,23 @@ export interface WorkspaceActions {
     edit(id: RecordId, edit: RecordEdit): void;
     remove(type: RecordType, id: RecordId): Promise<void>;
     notify(message: string): void;
+    /** Present only when the api keeps evidence files. */
+    attachments?: AttachmentActions;
+}
+
+export interface AttachmentActions {
+    /** Sends the files and ties each to the step. */
+    upload(stepId: RecordId, files: readonly File[]): Promise<void>;
+    link(stepId: RecordId, attachmentId: RecordId): Promise<void>;
+    unlink(stepId: RecordId, attachmentId: RecordId): Promise<void>;
+    /** Sends the file as the content of a record, naming the record after it when it has no better name. */
+    uploadToNode(nodeId: RecordId, file: File): Promise<void>;
+    linkNode(nodeId: RecordId, attachmentId: RecordId): Promise<void>;
+    unlinkNode(nodeId: RecordId, attachmentId: RecordId): Promise<void>;
+    remove(attachmentId: RecordId): Promise<void>;
+    url(attachmentId: RecordId, usage: AttachmentUsage): string;
+    /** Where the browser downloads the incident with its files. */
+    bundleUrl(): string;
 }
 
 export interface PanelContext {

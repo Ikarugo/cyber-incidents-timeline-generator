@@ -18,3 +18,4 @@ export * from "./mapping.js";
 export * from "./anonymize.js";
 export * from "./service.js";
 export * from "./sample.js";
+export * from "./attachments.js";

@@ -3,15 +3,30 @@
 // The panel is rebuilt when the selection changes and at no other time. An edit updates the record in
 // place, so the other fields keep what was typed in them and the scroll position stays where it was.
 
+import { AttachmentKind, AttachmentUsage, type Attachment } from "../core/attachments.js";
 import { impactLevelsOf } from "../core/catalog.js";
-import { LinkKind, RecordType, Side, type SideKey } from "../core/enums.js";
+import { LinkKind, NodeKind, RecordType, Side, type SideKey } from "../core/enums.js";
 import { Icon } from "../core/icon.js";
 import type { DiagramLink, DiagramNode, LinkUpdateInput, NodeUpdateInput, RecordId, StepUpdateInput } from "../core/models.js";
 import { joinWallClock, splitWallClock } from "../core/time.js";
 import type { Selection, TimelineStep } from "./diagram-store.js";
 import { h } from "./dom.js";
 import { button, checkbox, dateAndTime, field, multiSelect, recordMultiSelect, recordSelect, row, select, tagChips, textArea, textInput, type Choice, type SelectOptions } from "./forms.js";
-import type { PanelContext } from "./panels.js";
+import type { AttachmentActions, PanelContext } from "./panels.js";
+
+const HASH_PREFIX_LENGTH = 12;
+const BYTES_PER_UNIT = 1024;
+const SIZE_UNITS = ["B", "KB", "MB", "GB"] as const;
+
+function formatBytes(size: number): string {
+    let value = size;
+    let unit = 0;
+    while (value >= BYTES_PER_UNIT && unit < SIZE_UNITS.length - 1) {
+        value /= BYTES_PER_UNIT;
+        unit += 1;
+    }
+    return `${unit === 0 ? value : value.toFixed(1)} ${SIZE_UNITS[unit]}`;
+}
 
 type InspectedRecord =
     | { type: RecordType.Node; record: DiagramNode }
@@ -84,7 +99,9 @@ export class Inspector {
     }
 
     private signatureOf(inspected: InspectedRecord): string {
-        return JSON.stringify(inspected.record);
+        // A step and a File record both list the files of the incident, so a file added elsewhere shows
+        const holdsFiles = inspected.type === RecordType.Step || (inspected.type === RecordType.Node && inspected.record.kind === NodeKind.File);
+        return JSON.stringify([inspected.record, holdsFiles ? this.context.store.attachments ?? [] : []]);
     }
 
     /**
@@ -220,8 +237,169 @@ export class Inspector {
                 field(w.criticality, this.pick(node.criticality, impacts, value => { if (value) save({ criticality: value }); }))
             ),
             checkbox(w.compromised, node.compromised, value => save({ compromised: value })),
+            ...this.fileContent(node),
             field(w.notes, textArea(node.description, value => save({ description: value })))
         );
+    }
+
+    /**
+     * The files that prove the step. Pictures show as thumbnails; anything else is presented as hostile, with
+     * its hashes for lookups and a download that only ever hands out a locked ZIP. Files dropped on the block
+     * are attached like chosen ones.
+     */
+    private evidenceFiles(step: TimelineStep): HTMLElement[] {
+        const { store, actions, icons, permissions } = this.context;
+        const files = actions.attachments;
+        const incidentFiles = store.attachments;
+        if (!files || incidentFiles === null) return [];
+
+        const w = this.context.strings.inspector;
+        const mayTie = permissions.mayEdit(RecordType.Step);
+        const attached = store.attachmentsOf(step.id);
+        const list = h("div", "tlg-evidence-list");
+        if (attached.length === 0) list.append(h("p", "tlg-evidence-empty", {}, [w.noEvidenceFiles]));
+        attached.forEach(file => {
+            const otherSteps = file.stepIds.filter(id => id !== step.id).length;
+            list.append(this.evidenceRow(file, files, mayTie ? () => void files.unlink(step.id, file.id) : null, otherSteps > 0 ? w.alsoOnSteps(otherSteps) : ""));
+        });
+
+        const block = h("div", "tlg-evidence", {}, [list]);
+        const controls = h("div", "tlg-evidence-controls");
+        if (mayTie && permissions.canCreate) {
+            const picker = h("input", "tlg-evidence-picker", { type: "file", multiple: "", hidden: "" });
+            picker.addEventListener("change", () => {
+                const chosen = [...(picker.files ?? [])];
+                picker.value = "";
+                if (chosen.length > 0) void files.upload(step.id, chosen);
+            });
+            controls.append(button(icons, w.attachFile, "tlg-button", () => picker.click(), Icon.Upload), picker);
+            this.acceptDrops(block, dropped => void files.upload(step.id, dropped));
+        }
+        const others = incidentFiles.filter(file => !file.stepIds.includes(step.id));
+        if (mayTie && others.length > 0) {
+            controls.append(this.filePicker(others, w.attachExisting, id => void files.link(step.id, id)));
+        }
+        if (controls.childElementCount > 0) block.append(controls);
+        return [field(w.evidenceFiles, block)];
+    }
+
+    /**
+     * What a record of kind File holds: the file itself, kept like any evidence file, so its name, its hashes
+     * and a locked copy are one click away from the record that stands for it.
+     */
+    private fileContent(node: DiagramNode): HTMLElement[] {
+        const { store, actions, icons, permissions } = this.context;
+        const files = actions.attachments;
+        const incidentFiles = store.attachments;
+        if (node.kind !== NodeKind.File || !files || incidentFiles === null) return [];
+
+        const w = this.context.strings.inspector;
+        const mayTie = permissions.mayEdit(RecordType.Node);
+        const held = incidentFiles.filter(file => file.nodeIds.includes(node.id));
+        const list = h("div", "tlg-evidence-list");
+        if (held.length === 0) list.append(h("p", "tlg-evidence-empty", {}, [w.noFileContent]));
+        held.forEach(file => list.append(this.evidenceRow(file, files, mayTie ? () => void files.unlinkNode(node.id, file.id) : null, file.stepIds.length > 0 ? w.provesSteps(file.stepIds.length) : "")));
+
+        const block = h("div", "tlg-evidence", {}, [list]);
+        const controls = h("div", "tlg-evidence-controls");
+        if (mayTie && permissions.canCreate) {
+            const picker = h("input", "tlg-evidence-picker", { type: "file", hidden: "" });
+            picker.addEventListener("change", () => {
+                const [chosen] = [...(picker.files ?? [])];
+                picker.value = "";
+                if (chosen) void files.uploadToNode(node.id, chosen);
+            });
+            controls.append(button(icons, w.uploadFileContent, "tlg-button", () => picker.click(), Icon.Upload), picker);
+            this.acceptDrops(block, dropped => { if (dropped[0]) void files.uploadToNode(node.id, dropped[0]); });
+        }
+        const others = incidentFiles.filter(file => !file.nodeIds.includes(node.id));
+        if (mayTie && others.length > 0) {
+            controls.append(this.filePicker(others, w.attachExisting, id => void files.linkNode(node.id, id)));
+        }
+        if (controls.childElementCount > 0) block.append(controls);
+        return [field(w.fileContent, block)];
+    }
+
+    private filePicker(choices: readonly Attachment[], emptyLabel: string, onPick: (attachmentId: RecordId) => void): HTMLElement {
+        const options: Choice<string>[] = choices.map(file => ({ value: String(file.id), label: file.fileName }));
+        return select<string>(null, options, value => { if (value) onPick(Number(value)); }, { allowEmpty: true, emptyLabel, strings: this.context.strings.forms });
+    }
+
+    private acceptDrops(block: HTMLElement, onDrop: (files: File[]) => void): void {
+        block.addEventListener("dragover", event => {
+            event.preventDefault();
+            block.classList.add("is-dropping");
+        });
+        block.addEventListener("dragleave", () => block.classList.remove("is-dropping"));
+        block.addEventListener("drop", event => {
+            event.preventDefault();
+            block.classList.remove("is-dropping");
+            const dropped = [...(event.dataTransfer?.files ?? [])];
+            if (dropped.length > 0) onDrop(dropped);
+        });
+    }
+
+    private evidenceRow(file: Attachment, files: AttachmentActions, untie: (() => void) | null, note: string): HTMLDivElement {
+        const { icons, permissions } = this.context;
+        const w = this.context.strings.inspector;
+        const isImage = file.kind === AttachmentKind.Image;
+        const preview = files.url(file.id, AttachmentUsage.Preview);
+
+        const thumb = isImage
+            ? h("a", "tlg-evidence-thumb", { href: preview, target: "_blank", rel: "noopener noreferrer", title: file.fileName }, [h("img", null, { src: preview, alt: file.fileName, loading: "lazy" })])
+            : h("span", "tlg-evidence-thumb", { "aria-hidden": "true" }, [icons.element(Icon.Shield)]);
+
+        const meta = [formatBytes(file.size), `SHA-256 ${file.sha256.slice(0, HASH_PREFIX_LENGTH)}...`, note].filter(Boolean).join(" - ");
+        const hashes = h("div", "tlg-evidence-hashes", { hidden: "" }, [["SHA-256", file.sha256], ["SHA-1", file.sha1], ["MD5", file.md5]].map(([label = "", value = ""]) => {
+            const input = h("input", "tlg-input tlg-hash", { type: "text", readonly: "", value, "aria-label": label, spellcheck: "false" });
+            input.addEventListener("focus", () => input.select());
+            return h("div", "tlg-hash-row", {}, [h("span", null, {}, [label]), input]);
+        }));
+        const body = h("div", "tlg-evidence-body", {}, [
+            h("div", "tlg-evidence-name", { title: file.fileName }, [file.fileName]),
+            h("div", "tlg-evidence-meta", {}, [meta]),
+            isImage ? false : h("div", "tlg-evidence-notice", {}, [w.sampleNotice]),
+            hashes
+        ]);
+
+        const toggle = button(icons, w.hashes, "tlg-button tlg-button-quiet", () => {
+            hashes.hidden = !hashes.hidden;
+            toggle.setAttribute("aria-pressed", String(!hashes.hidden));
+        });
+        toggle.setAttribute("aria-pressed", "false");
+        const download = h("a", "tlg-button", { href: files.url(file.id, AttachmentUsage.Download), download: "" }, [icons.element(Icon.Download), isImage ? w.download : w.downloadLocked]);
+        const tools = h("div", "tlg-evidence-tools", {}, [download, toggle]);
+
+        if (untie) {
+            const detach = button(icons, "", "tlg-button tlg-button-quiet", untie, Icon.Close);
+            detach.title = w.detach;
+            detach.setAttribute("aria-label", w.detach);
+            tools.append(detach);
+        }
+        const row = h("div", `tlg-evidence-row${isImage ? "" : " is-sample"}`, {}, [thumb, body, tools]);
+
+        if (permissions.canDelete) {
+            // Asks again in place, as the rest of the panel does, since the file leaves every record it proves
+            const remove = button(icons, "", "tlg-button tlg-button-quiet", () => {
+                if (!row.classList.contains("is-confirming")) {
+                    row.classList.add("is-confirming");
+                    remove.textContent = w.confirmDeleteFile;
+                    remove.classList.add("tlg-button-danger");
+                    return;
+                }
+                void files.remove(file.id);
+            }, Icon.Trash);
+            remove.title = w.deleteFile;
+            remove.setAttribute("aria-label", w.deleteFile);
+            row.addEventListener("mouseleave", () => {
+                if (!row.classList.contains("is-confirming")) return;
+                row.classList.remove("is-confirming");
+                remove.classList.remove("tlg-button-danger");
+                remove.replaceChildren(icons.element(Icon.Trash));
+            });
+            tools.append(remove);
+        }
+        return row;
     }
 
     private stepFields(container: HTMLElement, step: TimelineStep): void {
@@ -261,6 +439,7 @@ export class Inspector {
                 field(w.audience, multiSelect(step.audiences, catalog.audiences, value => save({ audiences: value }), { emptyLabel: w.everyone, allLabel: w.everyone }))
             ),
             field(w.evidenceSource, textInput(step.evidenceSource, value => save({ evidenceSource: value }), w.evidenceSourceHint)),
+            ...this.evidenceFiles(step),
             checkbox(w.milestone, step.isMilestone, value => save({ isMilestone: value })),
             ...(catalog.milestones.length
                 ? [field(w.namedMilestone, this.pick(step.milestoneKey ?? "", catalog.milestones.map(entry => ({ value: entry.key, label: entry.label })), value => save({ milestoneKey: value || null }), { allowEmpty: true, emptyLabel: w.none }))]

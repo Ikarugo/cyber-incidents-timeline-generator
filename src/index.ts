@@ -25,7 +25,7 @@ export {
 export { Access, RecordAction, type TimelinePermissions } from "./ui/panels.js";
 export { ExportFormat, exportDocumentFile, standaloneHtml, serialize } from "./ui/export.js";
 export { IconSet } from "./ui/icons/icon-set.js";
-export { RelabeledTimelineApi } from "./ui/relabeled-api.js";
+export { RelabeledAttachmentApi, RelabeledTimelineApi, relabelApi } from "./ui/relabeled-api.js";
 export { DiagramStore, StoreChange, type TimelineStep, type Selection, type StepFilters } from "./ui/diagram-store.js";
 export { FONT_STACK, Palette, defaultTokenResolver, elementTokenResolver, textWidth, type TokenResolver } from "./ui/theme.js";
 

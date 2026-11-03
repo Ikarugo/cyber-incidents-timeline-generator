@@ -228,6 +228,9 @@ npx cyber-incidents-timeline-generator --db /var/lib/timeline/timeline.sqlite --
 | `--host <host>` | `127.0.0.1` | Interface to bind. The default only accepts connections from the same machine |
 | `--api-only` | off | Serve the REST API alone, without the incident desk |
 | `--seed` | off | Add the sample incident when the database is empty |
+| `--attachments <dir>` | `attachments` beside the database | Folder of the evidence files. None is kept with `--db :memory:` unless a folder is named |
+| `--no-attachments` | off | Keep no evidence files |
+| `--max-attachment-mb <mb>` | `50` | Largest evidence file accepted |
 
 The reference server has **no authentication**. Keep it on `127.0.0.1` for yourself, or put it behind a reverse
 proxy that authenticates users (nginx with SSO, oauth2-proxy, an identity aware proxy). To enforce who may do

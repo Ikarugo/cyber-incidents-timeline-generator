@@ -459,6 +459,14 @@ export function maskDiagram(diagram: Diagram, masker: Masker, mode: Disclosure):
             metadata: null
         })),
         links: diagram.links.map(link => ({ ...link, label: optional(link.label), metadata: null })),
+        // A file name carries a user name or a host as often as a record does, and a hash names a sample
+        ...(diagram.attachments ? { attachments: diagram.attachments.map(file => ({
+            ...file,
+            fileName: text(file.fileName),
+            md5: text(file.md5),
+            sha1: text(file.sha1),
+            sha256: text(file.sha256)
+        })) } : {}),
         benchmark: { ...diagram.benchmark, scope: optional(diagram.benchmark.scope) }
     };
 }

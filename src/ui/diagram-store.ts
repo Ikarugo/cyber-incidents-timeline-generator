@@ -1,6 +1,7 @@
 // Holds the diagram in memory, indexes the catalog served with it and tells listeners when something
 // changed. Every renderer and every panel reads from here and never from the network.
 
+import type { Attachment } from "../core/attachments.js";
 import { impactLevelsOf } from "../core/catalog.js";
 import type {
     AttackTacticInfo,
@@ -99,6 +100,7 @@ interface LoadedDiagram {
     metrics: ResponseMetrics;
     benchmark: ResponseBenchmark;
     catalog: Catalog;
+    attachments?: Attachment[];
 }
 
 function indexBy<TKey, TValue>(entries: readonly TValue[], key: (entry: TValue) => TKey): Map<TKey, TValue> {
@@ -163,6 +165,15 @@ export class DiagramStore {
 
     get isLoaded(): boolean {
         return this.loaded !== null;
+    }
+
+    /** The evidence files of the incident, or null when the server keeps none, which hides them. */
+    get attachments(): readonly Attachment[] | null {
+        return this.loaded?.attachments ?? null;
+    }
+
+    attachmentsOf(stepId: RecordId): Attachment[] {
+        return (this.loaded?.attachments ?? []).filter(entry => entry.stepIds.includes(stepId));
     }
 
     private get diagram(): LoadedDiagram {

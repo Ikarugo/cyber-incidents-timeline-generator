@@ -135,6 +135,29 @@ Content-Type: application/json; charset=utf-8
 { "id": 52, "timestamp": "2026-01-12T13:00:00", "killChainPhase": "ActionsOnObjectives", "...": "..." }
 ```
 
+## Evidence files
+
+Served by the reference server when it keeps files (`createAttachmentHandler`), and by nothing else. The
+diagram then carries an `attachments` array; its absence means the server keeps none.
+
+| Method | Path | Permission | Body and answer |
+|---|---|---|---|
+| `GET` | `/incidents/:id/attachments` | Read | The files of the incident, each with `stepIds` and `nodeIds` |
+| `POST` | `/incidents/:id/attachments` | Create | The raw file as `application/octet-stream`, its name URL encoded in `X-File-Name`. Answers the file; the same content sent again answers the file already kept |
+| `DELETE` | `/incidents/:id/attachments/:file` | Delete | Removes the file from the incident and every record |
+| `GET` | `/incidents/:id/attachments/:file/content` | Read | An image as it is; anything else as a ZIP locked with the password `infected` |
+| `GET` | `/incidents/:id/attachments/:file/content?usage=preview` | Read | An image inline, in a sandbox; 400 for anything else |
+| `PUT` | `/incidents/:id/steps/:step/attachments/:file` | Update | Ties the file to the step |
+| `DELETE` | `/incidents/:id/steps/:step/attachments/:file` | Update | Unties it |
+| `PUT` | `/incidents/:id/nodes/:node/attachments/:file` | Update | Makes the file the content of the record |
+| `DELETE` | `/incidents/:id/nodes/:node/attachments/:file` | Update | Takes it away |
+| `GET` | `/incidents/:id/bundle` | Read | The incident with its files as one ZIP: `timeline.json`, `files.json`, pictures under `files/images/`, every other file in its own locked ZIP under `files/samples/` |
+| `POST` | `/incidents/:id/bundle` | Create | A bundle as `application/octet-stream`, imported into the incident; answers the import report |
+| `POST` | `/bundles` | Create | A bundle imported as a new incident |
+
+A file is an image when its content starts like a PNG, JPEG, GIF or WebP, whatever its name; everything else,
+SVG included, is handled as a sample. File answers carry `Content-Security-Policy: sandbox` and `nosniff`.
+
 ## Errors
 
 Errors carry `{ "message": string }`, and validation errors add the issues found:

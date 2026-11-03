@@ -18,6 +18,25 @@ All notable changes to this project are documented here. The format follows
   is being dragged, a confirmation or a list is open, or a save is in flight, so nothing is redrawn under the
   viewer. A field that only had the focus gets it back after the redraw.
 
+- Evidence files. The reference server keeps files for an incident, and the details panel of a step attaches
+  them, by choice or by drop, ties a file already in the incident to it, unties or deletes one. A file may
+  prove several steps. Pictures (PNG, JPEG, GIF, WebP, told by their content) show as thumbnails; anything
+  else is handled as hostile and only downloads inside a ZIP locked with the password `infected`. MD5, SHA-1
+  and SHA-256 are shown for lookups. Files are stored once, enciphered, in the `attachments` folder beside the
+  database, so no antivirus on the host quarantines them; deleting a step unties its files and deleting an
+  incident deletes the files only it used. See `--attachments`, `--no-attachments` and `--max-attachment-mb`.
+- A record of kind File keeps the file itself as its content, shown and downloaded like any evidence file.
+  Uploading it names the record after the file when it only bore the name of its kind, and fills its
+  identifier with the SHA-256 when it had none.
+- A step proven by files shows a paperclip and their number on its card, in every export of the slides.
+- Bundles: the export menu offers the timeline with its files as one ZIP (`GET /incidents/:id/bundle`), and
+  the import button reads it back, into the open incident, tying every file to the records it belonged to.
+  The ZIP itself is not locked, so its timeline and pictures open anywhere, but every other file sits in its
+  own ZIP locked with `infected`, so unpacking a bundle never leaves a live sample on a disk. Every file is
+  checked against its SHA-256 before anything is imported. `POST /bundles` makes a new incident of a bundle.
+- An import reports the record each key of the document became, in `keys`.
+- The name and the hashes of an evidence file are masked like any other field when names are masked.
+
 ### Fixed
 
 - The details panel shows a record changed elsewhere while it is open, keeping its scroll.

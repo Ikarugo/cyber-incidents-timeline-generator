@@ -1,6 +1,7 @@
 // A TimelineApi that hands out the catalog with a viewer's own words and icons, for a catalog the viewer does
 // not own. Everything else passes straight through, so the owner still validates every write.
 
+import { supportsAttachments, type Attachment, type AttachmentApi, type AttachmentUsage } from "../core/attachments.js";
 import type { CatalogSettings, CatalogUsageEntry } from "../core/catalog-settings.js";
 import type { Catalog } from "../core/catalog.js";
 import type { ImportOptions, ImportReport, TimelineDocument } from "../core/document.js";
@@ -13,7 +14,7 @@ import type { DiagramSummary } from "../core/summary.js";
 import { relabelCatalog, type AppSettings } from "./settings.js";
 
 export class RelabeledTimelineApi implements TimelineApi {
-    private readonly api: TimelineApi;
+    protected readonly api: TimelineApi;
     /** Read on every call, so saved settings apply to the next load without a new wrapper. */
     private readonly settings: () => AppSettings;
 
@@ -115,4 +116,64 @@ export class RelabeledTimelineApi implements TimelineApi {
     saveLayout(incidentId: RecordId, layouts: LayoutInput[]): Promise<void> {
         return this.api.saveLayout(incidentId, layouts);
     }
+
+}
+
+/**
+ * The same wrapper for an api that keeps evidence files. It is a class of its own so a page whose api keeps
+ * none does not look as though it does, which is what decides whether the files are offered at all.
+ */
+export class RelabeledAttachmentApi extends RelabeledTimelineApi implements AttachmentApi {
+    private readonly attachments: AttachmentApi;
+
+    constructor(api: TimelineApi & AttachmentApi, settings: () => AppSettings) {
+        super(api, settings);
+        this.attachments = api;
+    }
+
+    listAttachments(incidentId: RecordId): Promise<Attachment[]> {
+        return this.attachments.listAttachments(incidentId);
+    }
+
+    uploadAttachment(incidentId: RecordId, file: Blob, fileName: string): Promise<Attachment> {
+        return this.attachments.uploadAttachment(incidentId, file, fileName);
+    }
+
+    linkAttachment(incidentId: RecordId, stepId: RecordId, attachmentId: RecordId): Promise<void> {
+        return this.attachments.linkAttachment(incidentId, stepId, attachmentId);
+    }
+
+    unlinkAttachment(incidentId: RecordId, stepId: RecordId, attachmentId: RecordId): Promise<void> {
+        return this.attachments.unlinkAttachment(incidentId, stepId, attachmentId);
+    }
+
+    linkNodeAttachment(incidentId: RecordId, nodeId: RecordId, attachmentId: RecordId): Promise<void> {
+        return this.attachments.linkNodeAttachment(incidentId, nodeId, attachmentId);
+    }
+
+    unlinkNodeAttachment(incidentId: RecordId, nodeId: RecordId, attachmentId: RecordId): Promise<void> {
+        return this.attachments.unlinkNodeAttachment(incidentId, nodeId, attachmentId);
+    }
+
+    deleteAttachment(incidentId: RecordId, attachmentId: RecordId): Promise<void> {
+        return this.attachments.deleteAttachment(incidentId, attachmentId);
+    }
+
+    importBundle(bundle: Blob, into?: RecordId): Promise<ImportReport> {
+        return this.attachments.importBundle(bundle, into);
+    }
+
+    attachmentUrl(incidentId: RecordId, attachmentId: RecordId, usage: AttachmentUsage): string {
+        return this.attachments.attachmentUrl(incidentId, attachmentId, usage);
+    }
+
+    bundleUrl(incidentId: RecordId): string {
+        return this.attachments.bundleUrl(incidentId);
+    }
+
+}
+
+/** Wraps an api in the viewer's own words, keeping its evidence files when it has any. */
+export function relabelApi(api: TimelineApi, settings: () => AppSettings): RelabeledTimelineApi {
+    return supportsAttachments(api) ? new RelabeledAttachmentApi(api, settings) : new RelabeledTimelineApi(api, settings);
 }
