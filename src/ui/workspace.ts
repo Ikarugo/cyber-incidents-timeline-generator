@@ -10,7 +10,7 @@ import { exportDocument } from "../core/document.js";
 import { Audience, Disclosure, RecordType, Representation, type AudienceKey, type RepresentationKey } from "../core/enums.js";
 import { Icon } from "../core/icon.js";
 import { linkFieldsOf, nodeFieldsOf, stepFieldsOf } from "../core/mapping.js";
-import type { LinkCreateInput, RecordId, StepInvolvement } from "../core/models.js";
+import type { Diagram, LinkCreateInput, RecordId, StepInvolvement } from "../core/models.js";
 import type { TimelineApi } from "../core/service.js";
 import type { KeyValueStorage } from "../storage/browser-storage-store.js";
 import { DiagramStore, StoreChange, withoutMoments, type Selection, type StepFilters } from "./diagram-store.js";
@@ -86,6 +86,11 @@ export interface TimelineOptions {
     onPrivacyChange?: (rules: PrivacyRules) => void;
     /** Forces how names are shown and takes the choice away from the viewer, for a page shown to an audience. */
     disclosureLock?: Disclosure;
+    /**
+     * How often, in milliseconds, the workspace looks for changes made elsewhere, by a colleague or through the
+     * API, and shows them. Defaults to five seconds; null turns it off, for a page that is the only writer.
+     */
+    syncInterval?: number | null;
 }
 
 /**
@@ -124,6 +129,10 @@ export interface TimelineHandle {
 
 const DEFAULT_PREFERENCE_KEY = "cyber-incidents-timeline";
 const TOAST_MS = 4000;
+const DEFAULT_SYNC_MS = 5000;
+// Anything waiting for the viewer to answer or pick, which a redraw would close under them
+const PENDING_CHOICE = ".is-confirming, .is-asking, details[open], .tlg-addmenu:not([hidden]), [aria-expanded=\"true\"]";
+const DETAIL_FIELDS = "input, textarea, select";
 // Names each control of the settings panel, so the focus survives the panel being rebuilt
 const CONTROL_KEY = "data-control";
 const AUDIENCE_CONTROL = "filter-audience";
@@ -327,6 +336,16 @@ class Workspace implements TimelineHandle {
     private pageIndex = 0;
     private pageCount = 1;
     private followedSelection: string | null = null;
+    private readonly syncInterval: number | null;
+    private syncTimer: ReturnType<typeof setTimeout> | undefined;
+    /** The diagram as the api last served it, or null once an edit made here has left it behind. */
+    private lastSeen: string | null = null;
+    /** Moves with every edit and every load, so a look that raced one of them knows its answer is stale. */
+    private revision = 0;
+    private unsaved = 0;
+    /** Whether a field holds input the viewer has not committed yet, which a redraw would throw away. */
+    private typing = false;
+    private pointing = false;
     private privacy: PrivacyRules;
     private readonly onPrivacyChange: ((rules: PrivacyRules) => void) | null;
     private readonly disclosureLock: Disclosure | null;
@@ -342,6 +361,7 @@ class Workspace implements TimelineHandle {
         this.renderers = options.renderers ?? BUILT_IN_RENDERERS;
         this.icons = options.icons ?? new IconSet();
         this.onNotify = options.onNotify ?? null;
+        this.syncInterval = options.syncInterval === undefined ? DEFAULT_SYNC_MS : options.syncInterval;
         this.onStateChange = options.onStateChange ?? null;
         this.slideHeader = options.slideHeader ?? null;
         this.canvasMode = options.canvasMode ?? CanvasMode.Slides;
@@ -489,11 +509,12 @@ class Workspace implements TimelineHandle {
 
     async start(): Promise<void> {
         try {
-            this.store.load(await this.api.getDiagram(this.incidentId));
+            this.show(await this.api.getDiagram(this.incidentId));
         } catch (error) {
             this.notify(this.strings.workspace.loadFailed);
             throw error;
         }
+        this.scheduleSync();
     }
 
     private bind(): void {
@@ -552,6 +573,19 @@ class Workspace implements TimelineHandle {
                 if (format) void this.exportAs(format);
             }, { signal });
         });
+
+        // Only input not yet committed holds a redraw back; a field that merely has the focus gets it back after one
+        const committed = (): void => { this.typing = false; };
+        this.root.addEventListener("input", () => { this.typing = true; }, { signal });
+        this.root.addEventListener("change", committed, { signal });
+        this.root.addEventListener("focusout", committed, { signal });
+        this.root.addEventListener("pointerdown", () => { this.pointing = true; }, { signal });
+        // The canvas captures the pointer while dragging, so the release can land anywhere on the page
+        const released = (): void => { this.pointing = false; };
+        document.addEventListener("pointerup", released, { signal });
+        document.addEventListener("pointercancel", released, { signal });
+        // A tab brought back to the front catches up at once rather than at the next look
+        document.addEventListener("visibilitychange", () => { if (!document.hidden) this.scheduleSync(0); }, { signal });
 
         this.root.addEventListener("keydown", event => {
             if (event.key === "Escape" && this.store.selection && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) {
@@ -1293,10 +1327,14 @@ class Workspace implements TimelineHandle {
             }
         }
 
-        saving.catch(() => {
-            this.notify(this.strings.workspace.saveFailed);
-            void this.reload();
-        });
+        this.revision += 1;
+        this.unsaved += 1;
+        saving
+            .then(() => { this.lastSeen = null; }, () => {
+                this.notify(this.strings.workspace.saveFailed);
+                void this.reload();
+            })
+            .finally(() => { this.unsaved -= 1; });
         return previous;
     }
 
@@ -1468,11 +1506,65 @@ class Workspace implements TimelineHandle {
     }
 
     async reload(): Promise<void> {
+        this.show(await this.api.getDiagram(this.incidentId));
+    }
+
+    /**
+     * Loads a diagram the api served and keeps the selection. It is read as text first because the store
+     * patches what it loads in place, and the text is what the next look compares against.
+     */
+    private show(diagram: Diagram, seen = JSON.stringify(diagram)): void {
         const selection = this.store.selection;
-        this.store.load(await this.api.getDiagram(this.incidentId));
+        const focused = this.focusedDetail();
+        this.revision += 1;
+        this.lastSeen = seen;
+        this.store.load(diagram);
         if (selection) {
             this.store.setSelection(selection);
         }
+        // The details panel was rebuilt, so the field the viewer was in is handed back to them
+        if (focused >= 0) this.detailFields()[focused]?.focus();
+    }
+
+    private detailFields(): HTMLElement[] {
+        return [...this.elements.inspector.querySelectorAll<HTMLElement>(DETAIL_FIELDS)];
+    }
+
+    private focusedDetail(): number {
+        const active = document.activeElement;
+        return active instanceof HTMLElement ? this.detailFields().indexOf(active) : -1;
+    }
+
+    private scheduleSync(delay = this.syncInterval): void {
+        if (delay === null || this.syncInterval === null || this.lifetime.signal.aborted) return;
+        clearTimeout(this.syncTimer);
+        this.syncTimer = setTimeout(() => void this.sync(), delay);
+    }
+
+    /**
+     * Shows what changed elsewhere since the last look. A redraw rebuilds the details panel and closes menus,
+     * so it waits for a quiet moment: no uncommitted input, drag, pending answer or save in flight.
+     */
+    private async sync(): Promise<void> {
+        try {
+            if (document.hidden || this.busy()) return;
+            const revision = this.revision;
+            const diagram = await this.api.getDiagram(this.incidentId);
+            const seen = JSON.stringify(diagram);
+            if (seen === this.lastSeen || revision !== this.revision || this.busy() || this.lifetime.signal.aborted) return;
+            // Without a baseline the difference is at least partly an edit made here, which needs no announcement
+            const fromElsewhere = this.lastSeen !== null;
+            this.show(diagram, seen);
+            if (fromElsewhere) this.notify(this.strings.workspace.updatedElsewhere);
+        } catch {
+            // A failed look is simply taken again at the next one; saving is where real trouble gets reported
+        } finally {
+            this.scheduleSync();
+        }
+    }
+
+    private busy(): boolean {
+        return this.typing || this.pointing || this.unsaved > 0 || this.root.querySelector(PENDING_CHOICE) !== null;
     }
 
     /**
@@ -1595,6 +1687,7 @@ class Workspace implements TimelineHandle {
 
     destroy(): void {
         this.lifetime.abort();
+        clearTimeout(this.syncTimer);
         this.stopWatchingTheme();
         this.root.replaceChildren();
         this.root.classList.remove("tlg");

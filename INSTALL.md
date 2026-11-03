@@ -628,6 +628,7 @@ await mountTimeline(element, { api, incidentId, icons });
 | `preferenceKey` | `string` | `cyber-incidents-timeline` | Key prefix for those preferences |
 | `slideHeader` | `(header, context) => header` | none | Rewrites the title block of every slide, see [Slide header](#slide-header) |
 | `onNotify` | `(message) => void` | toast | Receives messages such as save failures |
+| `syncInterval` | `number` or `null` | `5000` | Milliseconds between looks for changes made elsewhere, shown without a reload. `null` turns it off |
 
 It resolves to a handle:
 

@@ -16,6 +16,7 @@ export function installDom(): void {
         HTMLElement: window.HTMLElement,
         HTMLInputElement: window.HTMLInputElement,
         HTMLTextAreaElement: window.HTMLTextAreaElement,
+        HTMLSelectElement: window.HTMLSelectElement,
         MutationObserver: window.MutationObserver,
         getComputedStyle: () => ({ getPropertyValue: () => "" }),
         requestAnimationFrame: (callback: () => void) => setTimeout(callback, 0)

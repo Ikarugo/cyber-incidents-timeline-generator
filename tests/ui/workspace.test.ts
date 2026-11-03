@@ -5,6 +5,10 @@ import { BUILT_IN_RENDERERS } from "../../src/ui/renderers/index.js";
 import { ColorScheme } from "../../src/ui/theme-detection.js";
 import { mountTimeline, ThemeMode } from "../../src/ui/workspace.js";
 import { chooseOption, fieldNamed, installDom, syntheticEvent } from "../support/dom.js";
+import type { Diagram, RecordId } from "../../src/core/models.js";
+import { TimelineService } from "../../src/core/service.js";
+import { MemoryCatalogStore } from "../../src/storage/catalog-stores.js";
+import { MemoryTimelineStore } from "../../src/storage/memory-store.js";
 import { createIncident, createService, seededService } from "../support/fixtures.js";
 
 const VIEW_PILL = ".tlg-view-pill";
@@ -20,6 +24,9 @@ const AFTER_LAST_STEP = "2026-01-12T11:00:00";
 const PERSON_NAME = "Alice";
 const EXPLOIT_NAME = "CVE-2026-0001";
 const STEP_WITH_SECONDS = "2026-01-12T08:00:15";
+const SYNC_MS = 5;
+const SYNC_WAIT_MS = SYNC_MS * 8;
+const UPDATED_ELSEWHERE = "Updated with changes made elsewhere.";
 const EDITED_WITH_SECONDS = "2026-01-12T08:00:42";
 const TIME_FIELD = '.tlg-inspector input[type="time"]';
 
@@ -374,4 +381,123 @@ describe("mountTimeline", () => {
         assert.equal((await service.getDiagram(incident.id)).steps[0]?.timestamp, EDITED_WITH_SECONDS);
         handle.destroy();
     });
+
+    it("shows a change made elsewhere without a reload, and says so", async () => {
+        const { service } = createService();
+        const incident = await createIncident(service);
+        const step = await service.createStep(incident.id, { title: "Beacon", timestamp: FIRST_STEP });
+        const notices: string[] = [];
+        const element = mountPoint();
+        const handle = await mountTimeline(element, { api: service, incidentId: incident.id, preferences: null, syncInterval: SYNC_MS, onNotify: message => notices.push(message) });
+
+        await service.updateStep(incident.id, step.id, { title: "Beacon to a second host" });
+        await waitForSync();
+        assert.ok(element.textContent?.includes("Beacon to a second host"), "The change made elsewhere is not shown");
+        assert.deepEqual(notices, [UPDATED_ELSEWHERE]);
+        handle.destroy();
+    });
+
+    it("updates the details panel of a step changed elsewhere while it is open", async () => {
+        const { service } = createService();
+        const incident = await createIncident(service);
+        const step = await service.createStep(incident.id, { title: "Beacon", timestamp: FIRST_STEP });
+        const element = mountPoint();
+        const handle = await mountTimeline(element, { api: service, incidentId: incident.id, preferences: null, syncInterval: SYNC_MS });
+
+        handle.select({ type: RecordType.Step, id: step.id });
+        await settle();
+        await service.updateStep(incident.id, step.id, { title: "Beacon to a second host" });
+        await waitForSync();
+        assert.equal(titleField(element).value, "Beacon to a second host");
+        handle.destroy();
+    });
+
+    it("waits until the viewer commits what they are typing before showing a change made elsewhere", async () => {
+        const { service } = createService();
+        const incident = await createIncident(service);
+        const step = await service.createStep(incident.id, { title: "Beacon", timestamp: FIRST_STEP });
+        const element = mountPoint();
+        const handle = await mountTimeline(element, { api: service, incidentId: incident.id, preferences: null, syncInterval: SYNC_MS });
+
+        handle.select({ type: RecordType.Step, id: step.id });
+        await settle();
+        const field = titleField(element);
+        field.value = "Beacon to";
+        field.dispatchEvent(syntheticEvent("input"));
+
+        await service.createNode(incident.id, { name: "Added elsewhere", kind: NodeKind.Server });
+        await waitForSync();
+        assert.ok(!element.textContent?.includes("Added elsewhere"), "The workspace redrew while the viewer was typing");
+        assert.ok(field.isConnected, "The field being typed in was rebuilt");
+        assert.equal(field.value, "Beacon to");
+
+        field.dispatchEvent(syntheticEvent("focusout"));
+        await waitForSync();
+        assert.ok(element.textContent?.includes("Added elsewhere"), "The change was not shown once typing stopped");
+        handle.destroy();
+    });
+
+    it("does not announce its own edits as changes made elsewhere", async () => {
+        const { service } = createService();
+        const incident = await createIncident(service);
+        const step = await service.createStep(incident.id, { title: "Beacon", timestamp: FIRST_STEP });
+        const notices: string[] = [];
+        const element = mountPoint();
+        const handle = await mountTimeline(element, { api: service, incidentId: incident.id, preferences: null, syncInterval: SYNC_MS, onNotify: message => notices.push(message) });
+
+        handle.select({ type: RecordType.Step, id: step.id });
+        await settle();
+        const field = titleField(element);
+        field.value = "Beacon, renamed here";
+        field.dispatchEvent(syntheticEvent("change"));
+        await waitForSync();
+        assert.equal((await service.getDiagram(incident.id)).steps[0]?.title, "Beacon, renamed here");
+        assert.deepEqual(notices, []);
+        handle.destroy();
+    });
+
+    it("stops looking for changes once destroyed, and never looks when turned off", async () => {
+        const service = new CountingService(new MemoryTimelineStore());
+        const incident = await createIncident(service);
+        const handle = await mountTimeline(mountPoint(), { api: service, incidentId: incident.id, preferences: null, syncInterval: SYNC_MS });
+        await waitForSync();
+        assert.ok(service.reads > 1, "The workspace never looked for changes");
+
+        handle.destroy();
+        const readsWhenDestroyed = service.reads;
+        await waitForSync();
+        assert.equal(service.reads, readsWhenDestroyed);
+
+        const quiet = new CountingService(new MemoryTimelineStore());
+        const quietIncident = await createIncident(quiet);
+        const quietHandle = await mountTimeline(mountPoint(), { api: quiet, incidentId: quietIncident.id, preferences: null, syncInterval: null });
+        await waitForSync();
+        assert.equal(quiet.reads, 1);
+        quietHandle.destroy();
+    });
 });
+
+/** Counts the diagrams it serves, to see when the workspace looks for changes. */
+class CountingService extends TimelineService {
+    reads = 0;
+
+    constructor(store: MemoryTimelineStore) {
+        super(store, { catalogStore: new MemoryCatalogStore() });
+    }
+
+    override async getDiagram(incidentId: RecordId): Promise<Diagram> {
+        this.reads += 1;
+        return super.getDiagram(incidentId);
+    }
+}
+
+async function waitForSync(): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, SYNC_WAIT_MS));
+    await settle();
+}
+
+function titleField(element: HTMLElement): HTMLInputElement {
+    const input = fieldNamed(element.querySelector(".tlg-inspector") ?? element, "What happened").querySelector("input");
+    assert.ok(input, "The details panel has no title field");
+    return input;
+}
